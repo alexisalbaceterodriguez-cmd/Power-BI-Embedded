@@ -9,7 +9,6 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@azure/msal-node": "^3.8.10",
     "next": "16.2.0",
     "powerbi-client": "^2.23.10",
     "powerbi-client-react": "^2.0.2",

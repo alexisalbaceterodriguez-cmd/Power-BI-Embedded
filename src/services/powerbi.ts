@@ -1,5 +1,3 @@
-import { ConfidentialClientApplication } from '@azure/msal-node';
-
 export interface PowerBIEmbedConfig {
   tokenId: string;
   token: string;
@@ -19,29 +17,30 @@ export async function getEmbedToken(): Promise<PowerBIEmbedConfig> {
     throw new Error('Missing environment variables for Power BI backend authentication.');
   }
 
-  // 1. Authenticate with Azure AD using MSAL
-  const msalConfig = {
-    auth: {
-      clientId: clientId,
-      authority: `https://login.microsoftonline.com/${tenantId}`,
-      clientSecret: clientSecret,
+  // 1. Authenticate with Azure AD using standard fetch (Cloudflare Edge compatible)
+  const params = new URLSearchParams();
+  params.append('client_id', clientId);
+  params.append('client_secret', clientSecret);
+  params.append('scope', 'https://analysis.windows.net/powerbi/api/.default');
+  params.append('grant_type', 'client_credentials');
+
+  const tokenResponse = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
     },
-  };
+    body: params.toString(),
+  });
 
-  const cca = new ConfidentialClientApplication(msalConfig);
-  const clientCredentialRequest = {
-    scopes: ['https://analysis.windows.net/powerbi/api/.default'],
-  };
-
-  let tokenResponse;
-  try {
-    tokenResponse = await cca.acquireTokenByClientCredential(clientCredentialRequest);
-  } catch (error) {
-    console.error('Error acquiring Azure AD token:', error);
+  if (!tokenResponse.ok) {
+    const errorData = await tokenResponse.json();
+    console.error('Error acquiring Azure AD token:', errorData);
     throw new Error('Failed to acquire Azure AD token');
   }
 
-  const accessToken = tokenResponse?.accessToken;
+  const tokenData = await tokenResponse.json();
+  const accessToken = tokenData.access_token; // Note: access_token en la respuesta OAuth sin MSAL
+
   if (!accessToken) {
     throw new Error('Azure AD token could not be retrieved');
   }

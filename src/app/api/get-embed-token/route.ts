@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getEmbedToken } from '@/services/powerbi';
 
+export const runtime = 'edge';
+
 export async function GET() {
   try {
     const embedConfig = await getEmbedToken();

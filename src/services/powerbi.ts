@@ -1,11 +1,30 @@
+/**
+ * Configuration object returned by the Power BI embedded token service.
+ * Represents the credentials and routing addresses required by the frontend client.
+ */
 export interface PowerBIEmbedConfig {
+  /** The unique identifier of the generated embed token */
   tokenId: string;
+  /** The actual JWT embed token used by the iframe mapping */
   token: string;
+  /** Expiration timestamp for the token */
   expiration: string;
+  /** The authenticated URL pointing to the requested Power BI report */
   embedUrl: string;
+  /** The GUID of the Power BI report */
   reportId: string;
 }
 
+/**
+ * Fetches an Embed Token for a Power BI Report relying on the Azure AD Client Credentials flow.
+ *
+ * This function utilizes standard `fetch` instead of `@azure/msal-node` to guarantee 100% compatibility
+ * with Edge Computing environments like Cloudflare Workers and Vercel Edge.
+ * All infrastructure secrets must be preconfigured in `.env.local`.
+ *
+ * @returns {Promise<PowerBIEmbedConfig>} A promise resolving to the configuration payload.
+ * @throws {Error} Throws an error if required environment variables are absent or APIs reject access.
+ */
 export async function getEmbedToken(): Promise<PowerBIEmbedConfig> {
   const tenantId = process.env.TENANT_ID;
   const clientId = process.env.CLIENT_ID;

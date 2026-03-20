@@ -4,6 +4,13 @@ import React, { useEffect, useState } from 'react';
 import { PowerBIEmbed } from 'powerbi-client-react';
 import { models } from 'powerbi-client';
 
+/**
+ * EmbeddedReport
+ * 
+ * A client-side React component that acts as the primary wrapper for the Power BI report iframe.
+ * It asynchronously requests a secure embed token from the Next.js edge backend API and manages
+ * the loading and error states to provide seamless UX without exposing Azure credentials.
+ */
 export default function EmbeddedReport() {
   const [embedConfig, setEmbedConfig] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);

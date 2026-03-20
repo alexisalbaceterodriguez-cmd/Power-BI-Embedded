@@ -65,7 +65,6 @@ export default function EmbeddedReport() {
                 visible: true
               }
             },
-            background: models.BackgroundType.Transparent,
           }
         }}
         cssClassName="powerbi-iframe"

@@ -1,12 +1,3 @@
-:root {
-  --bg-color: #0f1115;
-  --text-primary: #ffffff;
-  --text-secondary: #94a3b8;
-  --accent-color: #0ea5e9;
-  --border-color: #1e293b;
-  --card-bg: #1e293b;
-}
-
 * {
   box-sizing: border-box;
   margin: 0;
@@ -14,56 +5,32 @@
 }
 
 html, body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  background-color: var(--bg-color);
-  color: var(--text-primary);
-  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: transparent;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden; /* Prevent scrolling around the iframe */
 }
 
 .main-layout {
   display: flex;
   flex-direction: column;
+  width: 100vw;
   height: 100vh;
-  padding: 1.5rem;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.page-header {
-  margin-bottom: 1.5rem;
-  text-align: left;
-}
-
-.page-header h1 {
-  font-size: 1.75rem;
-  font-weight: 700;
-  letter-spacing: -0.025em;
-  background: linear-gradient(to right, #ffffff, #94a3b8);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-.page-header p {
-  color: var(--text-secondary);
-  font-size: 0.95rem;
-  margin-top: 0.25rem;
+  margin: 0;
+  padding: 0;
 }
 
 .dashboard-section {
   flex-grow: 1;
-  background-color: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
 
 .report-container {
   flex: 1;
-  display: flex;
-  flex-direction: column;
   width: 100%;
   height: 100%;
 }
@@ -79,31 +46,24 @@ html, body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
-  color: var(--text-secondary);
+  height: 100vh;
+  width: 100vw;
+  color: #333;
   text-align: center;
-  padding: 2rem;
+  background-color: #f3f2f1; /* Power BI default loading background */
 }
 
 .error-container {
   color: #ef4444;
-}
-
-.error-container h2 {
-  margin-bottom: 0.5rem;
-}
-
-.error-container p {
-  color: var(--text-secondary);
-  margin-top: 0.5rem;
+  padding: 2rem;
 }
 
 /* Micro-animations */
 .spinner {
   width: 40px;
   height: 40px;
-  border: 4px solid var(--border-color);
-  border-top-color: var(--accent-color);
+  border: 4px solid #eaeaea;
+  border-top-color: #f2c811; /* Power BI Yellow */
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 1rem;
@@ -111,10 +71,4 @@ html, body {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
-}
-
-@media (max-width: 768px) {
-  .main-layout {
-    padding: 1rem;
-  }
 }

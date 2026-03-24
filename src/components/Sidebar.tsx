@@ -1,6 +1,7 @@
 'use client';
 
 import { useSession } from 'next-auth/react';
+import Image from 'next/image';
 import { REPORTS, ReportConfig } from '@/config/users.config';
 
 interface SidebarProps {
@@ -23,9 +24,7 @@ export default function Sidebar({ activeReportId, onSelectReport }: SidebarProps
     <aside className="app-sidebar" aria-label="Informes disponibles">
       {/* Brand Header */}
       <div className="sidebar-header">
-        <span className="sidebar-logo-text">
-          Seidor<span className="sidebar-logo-dot">.</span>
-        </span>
+        <Image src="/LOGO_COLOR_POSITIVE.webp" alt="Seidor Logo" width={130} height={40} style={{ objectFit: 'contain' }} priority />
       </div>
 
       <p className="sidebar-section-title">Análisis de Transformación</p>

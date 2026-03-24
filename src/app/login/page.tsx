@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,13 +38,15 @@ export default function LoginPage() {
       {/* Left Banner: Corporate Identity */}
       <div className="login-visual">
         <div className="login-visual-content">
+          <div className="login-logo">
+            <Image src="/LOGO_COLOR_POSITIVE.webp" alt="Seidor Logo" width={180} height={50} style={{ objectFit: 'contain' }} priority />
+          </div>
           <h1 className="login-visual-title">
-            Transformation<br />
-            <span>&amp; Technology</span>
+            Human focused.<br />
+            <strong>Technology Experts.</strong>
           </h1>
           <p className="login-visual-desc">
-            Te acompañamos en tu transformación digital. 
-            Accede a tu portal corporativo para explorar tus cuadros de mando interactivos e impulsar la innovación basada en datos.
+            Transformation &amp; Technology. Accede a tu portal corporativo para explorar tus cuadros de mando interactivos e impulsar la innovación basada en datos.
           </p>
         </div>
       </div>
@@ -52,7 +55,7 @@ export default function LoginPage() {
       <div className="login-form-container">
         <div className="login-card">
           <div className="login-brand-mobile">
-            Seidor <span>T&amp;T</span>
+            <Image src="/LOGO_COLOR_POSITIVE.webp" alt="Seidor Logo" width={140} height={40} style={{ objectFit: 'contain' }} priority />
           </div>
 
           <div className="login-form-header">

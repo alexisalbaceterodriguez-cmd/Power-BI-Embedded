@@ -1,26 +1,29 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Poppins } from 'next/font/google';
 import { SessionProvider } from 'next-auth/react';
 import './globals.css';
 
-const inter = Inter({
+// The Seidor brand uses Poppins Light and Semi Bold (300, 400, 600, 700)
+const poppins = Poppins({
+  weight: ['300', '400', '500', '600', '700'],
   subsets: ['latin'],
   display: 'swap',
+  variable: '--font-poppins',
 });
 
 export const metadata: Metadata = {
-  title: 'Power BI Portal',
-  description: 'Visor seguro de informes Power BI',
+  title: 'Seidor | Transformation & Technology',
+  description: 'Human focused. Technology Experts. Portal de datos y transformación digital interactivo de Seidor.',
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="es" className={inter.className}>
-      <body>
+    <html lang="es" className={`${poppins.variable}`}>
+      <body className={poppins.className}>
         <SessionProvider>{children}</SessionProvider>
       </body>
     </html>

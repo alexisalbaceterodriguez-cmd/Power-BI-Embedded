@@ -43,6 +43,12 @@ export interface ReportConfig {
   /** Power BI Report GUID */
   reportId: string;
   /**
+   * Optional: Overides RLS when the 'admin' views this report.
+   * Useful when an admin needs to see all data using a special "View All/Permisos" role.
+   */
+  adminRlsUsername?: string;
+  adminRlsRoles?: string[];
+  /**
    * Optional: UPN for RLS (e.g. 'acme@empresa.com').
    * Must match the identity used in Power BI Desktop roles.
    * Leave undefined to skip RLS for this report.
@@ -65,8 +71,8 @@ export const USERS: UserConfig[] = [
   {
     id: '1',
     username: 'admin',
-    // Default password: "admin123" — CHANGE THIS IN PRODUCTION
-    passwordHash: '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
+    // Default password: "12345" — CHANGE THIS IN PRODUCTION
+    passwordHash: '$2b$10$W.tfBjBIpMktaYnN6VvXduKwXMWysTlGE1.fsGXACjNd.aE8GQBTq',
     role: 'admin',
     reportIds: ['*'],
   },
@@ -78,6 +84,23 @@ export const USERS: UserConfig[] = [
     passwordHash: '$2b$10$W.tfBjBIpMktaYnN6VvXduKwXMWysTlGE1.fsGXACjNd.aE8GQBTq',
     role: 'client',
     reportIds: ['informe-alexis'],
+  },
+  {
+    id: '3',
+    username: 'Alexderelite',
+    email: 'alexderelite@gmail.com',
+    // Password: "12345"
+    passwordHash: '$2b$10$W.tfBjBIpMktaYnN6VvXduKwXMWysTlGE1.fsGXACjNd.aE8GQBTq',
+    role: 'client',
+    reportIds: ['informe-alexderelite'],
+  },
+  {
+    id: '4',
+    username: 'webinar',
+    // Password: "12345"
+    passwordHash: '$2b$10$W.tfBjBIpMktaYnN6VvXduKwXMWysTlGE1.fsGXACjNd.aE8GQBTq',
+    role: 'client',
+    reportIds: ['informe-webinar'],
   },
 ];
 
@@ -96,5 +119,25 @@ export const REPORTS: ReportConfig[] = [
     reportId: 'e157b1cd-919b-4644-8cd1-aaa4a497e134',
     rlsUsername: 'alexis.albacete@seidor.com',
     rlsRoles: ['Empresa 10'],
+  },
+  {
+    id: 'informe-alexderelite',
+    displayName: 'Dashboard Empresa 02',
+    workspaceId: 'c34b3294-3de8-48db-a670-139b2e0a4741',
+    reportId: 'e157b1cd-919b-4644-8cd1-aaa4a497e134',
+    rlsUsername: 'alexderelite@gmail.com',
+    rlsRoles: ['Empresa 02'],
+  },
+  {
+    id: 'informe-webinar',
+    displayName: 'Informe Webinar',
+    workspaceId: 'c34b3294-3de8-48db-a670-139b2e0a4741', // Misma área de trabajo
+    reportId: '7edc7252-cf0c-4185-a0a9-b365153697d7',
+    // Si el dataset tiene RLS, PBI obliga a usarlo. Usamos 'Permisos'
+    rlsUsername: 'alexis.albacete@seidor.com',
+    rlsRoles: ['Permisos'],
+    // Y forzamos que el admin use estos para verlo todo
+    adminRlsUsername: 'alexis.albacete@seidor.com',
+    adminRlsRoles: ['Permisos'],
   },
 ];

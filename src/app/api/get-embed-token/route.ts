@@ -47,12 +47,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Report configuration not found' }, { status: 404 });
     }
 
-    // 5. Generate embed token — include RLS only for non-admin users when config is present
+    // 5. Generate embed token — Always pass RLS if configured.
+    // Power BI REST API strictly requires an effective identity for any dataset that has RLS enabled, even for Service Principals.
     const embedConfig = await getEmbedToken({
       workspaceId: reportConfig.workspaceId,
       reportId: reportConfig.reportId,
-      rlsUsername: isAdmin ? undefined : reportConfig.rlsUsername,
-      rlsRoles: isAdmin ? undefined : reportConfig.rlsRoles,
+      rlsUsername: isAdmin ? (reportConfig.adminRlsUsername ?? reportConfig.rlsUsername) : reportConfig.rlsUsername,
+      rlsRoles: isAdmin ? (reportConfig.adminRlsRoles ?? reportConfig.rlsRoles) : reportConfig.rlsRoles,
     });
 
     return NextResponse.json(embedConfig, { status: 200 });

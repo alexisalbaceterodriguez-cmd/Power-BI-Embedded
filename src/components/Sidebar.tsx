@@ -21,10 +21,17 @@ export default function Sidebar({ activeReportId, onSelectReport }: SidebarProps
 
   return (
     <aside className="app-sidebar" aria-label="Informes disponibles">
-      <p className="sidebar-section-title">Informes</p>
+      {/* Brand Header */}
+      <div className="sidebar-header">
+        <span className="sidebar-logo-text">
+          Seidor<span className="sidebar-logo-dot">.</span>
+        </span>
+      </div>
+
+      <p className="sidebar-section-title">Análisis de Transformación</p>
 
       {accessibleReports.length === 0 ? (
-        <p className="sidebar-empty">No tienes informes asignados.</p>
+        <p className="sidebar-empty">No tienes activos digitales asignados a tu plataforma todavía.</p>
       ) : (
         <nav className="sidebar-nav" aria-label="Lista de informes">
           {accessibleReports.map((report) => (
@@ -48,6 +55,14 @@ export default function Sidebar({ activeReportId, onSelectReport }: SidebarProps
           ))}
         </nav>
       )}
+
+      {/* Footer Branding T&T */}
+      <div className="sidebar-footer">
+        <p className="sidebar-division">
+          Powered by
+          <span>Transformation &amp; Technology</span>
+        </p>
+      </div>
     </aside>
   );
 }

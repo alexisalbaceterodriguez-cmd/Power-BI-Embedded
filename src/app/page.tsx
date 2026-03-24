@@ -34,8 +34,8 @@ export default function Home() {
 
   if (status === 'loading') {
     return (
-      <div className="state-container" style={{ height: '100vh' }}>
-        <div className="spinner" aria-label="Cargando sesión" />
+      <div className="state-container" style={{ border: 'none', boxShadow: 'none', background: 'transparent' }}>
+        <div className="spinner" aria-label="Validando credenciales corporativas..." />
       </div>
     );
   }
@@ -50,11 +50,11 @@ export default function Home() {
           <EmbeddedReport reportId={activeReportId} />
         ) : (
           <div className="state-container">
-            <svg className="state-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path fillRule="evenodd" d="M2.25 2.25a.75.75 0 000 1.5H3v10.5a3 3 0 003 3h1.21l-1.172 3.513a.75.75 0 001.424.474l.329-.987h8.418l.33.987a.75.75 0 001.422-.474l-1.17-3.513H18a3 3 0 003-3V3.75h.75a.75.75 0 000-1.5H2.25zm6.04 16.5l.5-1.5h6.42l.5 1.5H8.29zm7.46-12a.75.75 0 00-1.5 0v6a.75.75 0 001.5 0v-6zm-3 2.25a.75.75 0 00-1.5 0v3.75a.75.75 0 001.5 0V9zm-3 2.25a.75.75 0 00-1.5 0v1.5a.75.75 0 001.5 0v-1.5z" clipRule="evenodd"/>
+            <svg className="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
             </svg>
-            <p className="state-title">Selecciona un informe</p>
-            <p className="state-subtitle">Elige un informe del panel lateral para comenzar.</p>
+            <h2 className="state-title">Bienvenido a tu plataforma de análisis de Seidor</h2>
+            <p className="state-subtitle">Selecciona un cuadro de mando en el panel lateral izquierdo para consultar tus métricas y potenciar tu proceso de transformación digital.</p>
           </div>
         )}
       </main>

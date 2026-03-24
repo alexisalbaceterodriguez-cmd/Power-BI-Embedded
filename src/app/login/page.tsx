@@ -25,7 +25,7 @@ export default function LoginPage() {
     setLoading(false);
 
     if (result?.error) {
-      setError('Usuario o contraseña incorrectos.');
+      setError('Credenciales incorrectas. Por favor, verifica tu usuario o contraseña.');
     } else {
       router.push('/');
       router.refresh();
@@ -34,75 +34,86 @@ export default function LoginPage() {
 
   return (
     <div className="login-page">
-      <div className="login-card">
-        {/* Logo / Brand */}
-        <div className="login-brand">
-          <div className="login-logo">
-            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <rect width="32" height="32" rx="8" fill="#F2C811"/>
-              <rect x="6" y="14" width="5" height="12" rx="1.5" fill="#1A1A2E"/>
-              <rect x="13.5" y="9" width="5" height="17" rx="1.5" fill="#1A1A2E"/>
-              <rect x="21" y="6" width="5" height="20" rx="1.5" fill="#1A1A2E"/>
-            </svg>
-          </div>
-          <h1 className="login-title">Power BI Portal</h1>
-          <p className="login-subtitle">Accede a tus informes</p>
+      {/* Left Banner: Corporate Identity */}
+      <div className="login-visual">
+        <div className="login-visual-content">
+          <h1 className="login-visual-title">
+            Transformation<br />
+            <span>&amp; Technology</span>
+          </h1>
+          <p className="login-visual-desc">
+            Te acompañamos en tu transformación digital. 
+            Accede a tu portal corporativo para explorar tus cuadros de mando interactivos e impulsar la innovación basada en datos.
+          </p>
         </div>
+      </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="login-form" noValidate>
-          <div className="form-group">
-            <label htmlFor="username" className="form-label">Usuario</label>
-            <input
-              id="username"
-              type="text"
-              className="form-input"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Tu nombre de usuario"
-              autoComplete="username"
-              required
-              disabled={loading}
-            />
+      {/* Right Banner: Login Area */}
+      <div className="login-form-container">
+        <div className="login-card">
+          <div className="login-brand-mobile">
+            Seidor <span>T&amp;T</span>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="password" className="form-label">Contraseña</label>
-            <input
-              id="password"
-              type="password"
-              className="form-input"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              autoComplete="current-password"
-              required
-              disabled={loading}
-            />
+          <div className="login-form-header">
+            <h2 className="login-title">Inicia Sesión</h2>
+            <p className="login-subtitle">Introduce tus credenciales corporativas para acceder a la plataforma.</p>
           </div>
 
-          {error && (
-            <div className="login-error" role="alert">
-              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
-              </svg>
-              {error}
+          <form onSubmit={handleSubmit} className="login-form" noValidate>
+            <div className="form-group">
+              <label htmlFor="username" className="form-label">Usuario</label>
+              <input
+                id="username"
+                type="text"
+                className="form-input"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="ej: nombre.apellido"
+                autoComplete="username"
+                required
+                disabled={loading}
+              />
             </div>
-          )}
 
-          <button
-            type="submit"
-            className="login-btn"
-            disabled={loading}
-            id="login-submit"
-          >
-            {loading ? (
-              <span className="btn-spinner" aria-label="Cargando" />
-            ) : (
-              'Iniciar sesión'
+            <div className="form-group">
+              <label htmlFor="password" className="form-label">Contraseña</label>
+              <input
+                id="password"
+                type="password"
+                className="form-input"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                autoComplete="current-password"
+                required
+                disabled={loading}
+              />
+            </div>
+
+            {error && (
+              <div className="login-error" role="alert">
+                <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/>
+                </svg>
+                {error}
+              </div>
             )}
-          </button>
-        </form>
+
+            <button
+              type="submit"
+              className="login-btn"
+              disabled={loading}
+              id="login-submit"
+            >
+              {loading ? (
+                <span className="btn-spinner" aria-label="Validando credenciales..." />
+              ) : (
+                'Acceder al Portal'
+              )}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );

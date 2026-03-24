@@ -10,17 +10,6 @@ export default function Header() {
 
   return (
     <header className="app-header">
-      {/* Brand */}
-      <div className="header-brand">
-        <svg className="header-logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <rect width="32" height="32" rx="8" fill="#F2C811"/>
-          <rect x="6" y="14" width="5" height="12" rx="1.5" fill="#1A1A2E"/>
-          <rect x="13.5" y="9" width="5" height="17" rx="1.5" fill="#1A1A2E"/>
-          <rect x="21" y="6" width="5" height="20" rx="1.5" fill="#1A1A2E"/>
-        </svg>
-        <span className="header-brand-name">Power BI Portal</span>
-      </div>
-
       {/* User info & logout */}
       <div className="header-user">
         <div className="header-badge">
@@ -28,7 +17,7 @@ export default function Header() {
           <span className="header-username">{username}</span>
         </div>
         <span className={`header-role ${role === 'admin' ? 'admin' : ''}`}>
-          {role === 'admin' ? 'Admin' : 'Cliente'}
+          {role === 'admin' ? 'Admin' : 'Transformation Client'}
         </span>
         <button
           id="logout-btn"

@@ -5,6 +5,7 @@
  */
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
+import MicrosoftEntraId from 'next-auth/providers/microsoft-entra-id';
 import bcrypt from 'bcryptjs';
 import { USERS } from '@/config/users.config';
 
@@ -27,6 +28,11 @@ declare module 'next-auth' {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
+    MicrosoftEntraId({
+      clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID,
+      clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
+      issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+    }),
     Credentials({
       name: 'Credentials',
       credentials: {
@@ -48,6 +54,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return {
           id: user.id,
           name: user.username,
+          email: user.email,
           role: user.role,
           reportIds: user.reportIds,
         };
@@ -55,14 +62,38 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
-      if (user) {
+    async signIn({ user, account }) {
+      if (account?.provider === 'microsoft-entra-id') {
+        const email = user.email?.toLowerCase();
+        if (!email) return false;
+
+        const configUser = USERS.find((u) => u.email?.toLowerCase() === email);
+        if (!configUser) {
+          // Reject user if not found in users.config.ts
+          return false;
+        }
+      }
+      return true;
+    },
+    async jwt({ token, user, account, profile }) {
+      if (account?.provider === 'microsoft-entra-id' && user?.email) {
+        // Enforce user lookup again for JWT binding
+        const configUser = USERS.find((u) => u.email?.toLowerCase() === user.email?.toLowerCase());
+        if (configUser) {
+          token.id = configUser.id;
+          token.role = configUser.role;
+          token.reportIds = configUser.reportIds;
+        }
+      } else if (user) {
+        // Credentials provider
+        token.id = user.id;
         token.role = user.role;
         token.reportIds = user.reportIds;
       }
       return token;
     },
     async session({ session, token }) {
+      session.user.id = token.id as string;
       session.user.role = token.role as string;
       session.user.reportIds = token.reportIds as string[];
       return session;

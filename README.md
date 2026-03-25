@@ -1,58 +1,57 @@
 # Power BI Embedded Next.js Viewer
 
-This is a modern Next.js 15 application designed to securely embed a Power BI report using the **App Owns Data** authentication strategy (Service Principal). It acts as a full-screen, native-feeling portal for your visualizations while keeping all Azure AD credentials strictly server-side.
+This is a modern Next.js 15 application designed to securely embed Power BI reports using the **App Owns Data** strategy. It features a dual authentication system: local credentials for quick access and **Microsoft Entra ID (Azure AD)** for enterprise-grade security and B2B guest support.
 
 ## Features
 
-- **Next.js 15 App Router**: Clean architecture supporting static rendering.
-- **Edge Compatible API**: The `/api/get-embed-token` route is completely decoupled from heavyweight Node.js libraries, relying entirely on native `fetch` over OAuth 2.0. This guarantees 100% compatibility with **Cloudflare Pages** and Vercel Edge.
-- **Power BI Client React**: Seamless UI lifecycle integration with automatic token retrieval and loading states.
-- **Full Screen Native Theme**: The frontend utilizes pure CSS (`globals.css`) mapped strictly to `100vw`/`100vh` to seamlessly blend the iframe as a standalone web app.
+- **Next.js 15 App Router**: Clean architecture supporting static rendering and Middleware protection.
+- **Dual Authentication**: 
+  - **Microsoft Entra ID**: Native integration for corporate accounts and invited guests.
+  - **Credentials Flow**: Local user mapping for non-Azure users.
+- **Strict Security Mapping**: Only users explicitly defined in `src/config/users.config.ts` can access the platform, even when using Microsoft login.
+- **Edge Compatible API**: The `/api/get-embed-token` route is decoupled from heavyweight Node.js libraries, ensuring 100% compatibility with **Cloudflare Pages** and Vercel Edge.
+- **Power BI Client React**: Seamless UI lifecycle integration with automatic token retrieval.
+- **Premium Corporate UI**: Dark-themed, responsive interface tailored for Seidor corporate identity.
 
 ---
 
 ## 🚀 Setup Instructions
 
 ### 1. Azure Active Directory (Entra ID) Requirements
-Before deploying, you must prepare a **Service Principal** in Azure and grant it access to your Power BI Workspace:
+You must prepare an **App Registration** and grant it access to your Power BI Workspace:
 
-1. Go to the Azure Portal -> **App Registrations** -> **New registration**.
-2. Copy the **Application (client) ID** and the **Directory (tenant) ID**.
-3. Go to **Certificates & secrets** and create a New client secret. Copy the **Value** immediately.
-4. In your Power BI Admin portal (Tenant Settings), ensure that *Allow service principals to use Power BI APIs* is enabled.
-5. In your Power BI Workspace -> **Manage Access** -> Add your App Registration as an **Admin** or **Member**.
+1. Portal de Azure -> **App Registrations** -> **New registration**.
+2. **Redirect URI**: Add `http://localhost:3000/api/auth/callback/microsoft-entra-id` (for local testing) and your production URL.
+3. Copy **Application (client) ID** and **Directory (tenant) ID**.
+4. Create a **Client Secret** and copy its value.
+5. **Power BI Setup**: Enable *Allow service principals to use Power BI APIs* in the Admin Portal and add the App as **Member/Admin** in your Workspace.
 
 ### 2. Local Environment Variables
-Populate the 5 secrets in the `.env.local` file:
+Create a `.env.local` file based on `.env.local.example`:
 
 ```env
-TENANT_ID="your_azure_tenant_id_here"
-CLIENT_ID="your_azure_client_id_here"
-CLIENT_SECRET="your_azure_client_secret_here"
-WORKSPACE_ID="your_power_bi_workspace_id_here"
-REPORT_ID="your_power_bi_report_id_here"
+TENANT_ID="your_tenant_id"
+CLIENT_ID="your_client_id"
+CLIENT_SECRET="your_client_secret"
+WORKSPACE_ID="your_workspace_id"
+REPORT_ID="your_report_id"
+
+# NextAuth Configuration
+NEXTAUTH_SECRET="random_32_char_string"
+NEXTAUTH_URL="http://localhost:3000"
+
+# Microsoft Entra ID variables (reuse the same client/tenant IDs)
+AUTH_MICROSOFT_ENTRA_ID_ID="your_client_id"
+AUTH_MICROSOFT_ENTRA_ID_SECRET="your_client_secret"
+AUTH_MICROSOFT_ENTRA_ID_ISSUER="https://login.microsoftonline.com/your_tenant_id/v2.0"
 ```
 
 ### 3. Running Locally
-Double-click `run_server.bat` on Windows, or execute manually:
 ```bash
 npm run dev
 ```
 
 ---
 
-## ☁️ Cloudflare Pages Deployment Guide
-
-Because the application is optimized for Edge Networks via `wrangler.json`, it deploys flawlessly to Cloudflare Pages:
-
-1. Navigate to **Workers & Pages** in your Cloudflare dashboard.
-2. Click **Create** and strictly select the **PAGES** tab (do not use the Workers tab).
-3. Connect your GitHub repository.
-4. Cloudflare will request your project configuration:
-   - **Framework preset**: `Next.js`
-   - **Build command**: `npx @cloudflare/next-on-pages@1`
-   - **Build output directory**: `.vercel/output/static`
-5. Input your 5 Power BI environment variables in the variables section.
-6. Click **Save and Deploy**.
-
-*(Note: The required `nodejs_compat` parameter is auto-injected thanks to the `wrangler.json` manifest mapped inside).*
+## 📖 Documentation
+Detailed configuration for Users, Reports, and RLS can be found in [MANUAL_CONFIGURACION.md](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/MANUAL_CONFIGURACION.md).

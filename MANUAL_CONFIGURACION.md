@@ -101,3 +101,23 @@ En el array `REPORTS`, al configurar el informe, añade dos propiedades opcional
 4. Añades un bloque nuevo en `REPORTS` con esos IDs (y añades `rlsUsername/rlsRoles` si filtra por usuario).
 5. En ese mismo archivo, buscas al usuario en `USERS` y le añades el `id` que le pusiste al informe a su lista `reportIds`.
 6. ¡Listo! Al refrescar la web el usuario verá su nuevo menú en la barra lateral.
+
+---
+
+## 🔑 4. Autenticación con Microsoft Entra ID (Azure AD)
+
+La aplicación soporta inicio de sesión nativo e integrado con Microsoft Entra ID (para invitados B2B y usuarios corporativos).
+Para que un usuario pueda iniciar sesión con Microsoft, su correo electrónico **debe estar dado de alta** en el array `USERS` de `src/config/users.config.ts`.
+
+### Configuración de Variables de Entorno
+
+En tu portal de Azure, asegúrate de registrar una aplicación (App Registration) y configurar una clave secreta.
+Luego, en tu archivo `.env.local` (o en tu servicio de hosting), añade las siguientes variables:
+
+```env
+AUTH_MICROSOFT_ENTRA_ID_ID="tu-client-id"
+AUTH_MICROSOFT_ENTRA_ID_SECRET="tu-client-secret"
+AUTH_MICROSOFT_ENTRA_ID_ISSUER="https://login.microsoftonline.com/tu-tenant-id/v2.0"
+```
+
+Si el usuario inicia sesión con Microsoft pero su correo no existe en la lista de `USERS` autorizados, la plataforma denegará el inicio de sesión por seguridad, redirigiéndolo con un mensaje de acceso denegado.

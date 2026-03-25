@@ -3,13 +3,14 @@
 ## Changes Made
 - **Next.js Foundation**: Initialized a Next.js 15 App router footprint cleanly in the workspace.
 - **Security / Back-end**: Developed [src/services/powerbi.ts](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/services/powerbi.ts) implementing `@azure/msal-node` to acquire Active Directory tokens securely using the Client Credentials Flow (Service Principal).
+- **Entra ID Integration**: Added Native B2B / internal user Microsoft Entra ID authentication via NextAuth into [src/auth.ts](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/auth.ts). Login UI was updated in [src/app/login/page.tsx](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/app/login/page.tsx) with strict mapping constraints rejecting unlisted users.
 - **API Setup**: Configured a Next.js API route [src/app/api/get-embed-token/route.ts](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/app/api/get-embed-token/route.ts) that safely relays the Embed Tokens and URLs strictly to the frontend bypassing credential leak.
 - **Front-end Embed**: Built [src/components/PowerBIEmbed.tsx](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/components/PowerBIEmbed.tsx) using `powerbi-client-react` to dynamically mount the embedded report and handle loading and error states intuitively.
 - **Aesthetics**: Wrote a premium dark-themed vanilla CSS setup in [globals.css](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/app/globals.css) that provides a stunning framework.
 - **Codebase Cleanliness**: Swept empty SVGs, documented functions with thorough JSDoc standards, and created an enterprise-level [README.md](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/README.md).
 
 ## What Was Tested
-- **Compilation Check**: Successfully compiled the React & Next.js codebase statically via `npm run build` checking type definitions correctly.
+- **Compilation Check**: Successfully compiled the React & Next.js codebase statically via `npm run build` checking type definitions correctly (including the new NextAuth config and login components).
 - SSR boundary was handled accurately using `next/dynamic`, avoiding generic window initialization errors frequently caused by `powerbi-client-react` during Server Components rendering.
 
 ## Validation Results

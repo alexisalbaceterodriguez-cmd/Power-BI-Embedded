@@ -13,6 +13,7 @@ declare module 'next-auth' {
   interface User {
     role: string;
     reportIds: string[];
+    rlsRoles?: string[];
   }
   interface Session {
     user: {
@@ -22,6 +23,7 @@ declare module 'next-auth' {
       image?: string | null;
       role: string;
       reportIds: string[];
+      rlsRoles?: string[];
     };
   }
 }
@@ -57,6 +59,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           role: user.role,
           reportIds: user.reportIds,
+          rlsRoles: user.rlsRoles,
         };
       },
     }),
@@ -83,12 +86,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           token.id = configUser.id;
           token.role = configUser.role;
           token.reportIds = configUser.reportIds;
+          token.rlsRoles = configUser.rlsRoles;
         }
       } else if (user) {
         // Credentials provider
         token.id = user.id;
         token.role = user.role;
         token.reportIds = user.reportIds;
+        token.rlsRoles = user.rlsRoles;
       }
       return token;
     },
@@ -96,6 +101,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.id = token.id as string;
       session.user.role = token.role as string;
       session.user.reportIds = token.reportIds as string[];
+      session.user.rlsRoles = token.rlsRoles as string[] | undefined;
       return session;
     },
 

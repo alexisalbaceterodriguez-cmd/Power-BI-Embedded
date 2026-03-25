@@ -31,6 +31,11 @@ export interface UserConfig {
    * Use ['*'] for admin users to grant access to all reports.
    */
   reportIds: string[];
+  /**
+   * Optional: Specific RLS roles for this user.
+   * These roles will be sent to Power BI instead of the report's default roles.
+   */
+  rlsRoles?: string[];
 }
 
 export interface ReportConfig {
@@ -71,28 +76,33 @@ export const USERS: UserConfig[] = [
   {
     id: '1',
     username: 'admin',
+    email: 'alexis.albacete@sdmaservices.com',
     // Default password: "12345" — CHANGE THIS IN PRODUCTION
     passwordHash: '$2b$10$W.tfBjBIpMktaYnN6VvXduKwXMWysTlGE1.fsGXACjNd.aE8GQBTq',
     role: 'admin',
-    reportIds: ['*'],
+    reportIds: ['finance-controlling', 'informe-webinar'],
+    // adminRlsUsername: 'alexis.albacete@sdmaservices.com',
+
   },
   {
     id: '2',
     username: 'AlexisAlbacete',
-    email: 'alexis.albacete@seidor.com',
+    email: 'aalbacete_seidor.es#EXT#@sdmadmn.onmicrosoft.com',
     // Password: "12345"
     passwordHash: '$2b$10$W.tfBjBIpMktaYnN6VvXduKwXMWysTlGE1.fsGXACjNd.aE8GQBTq',
     role: 'client',
-    reportIds: ['informe-alexis'],
+    reportIds: ['finance-controlling', 'informe-webinar'],
+    rlsRoles: ['Empresa 01', 'Permisos'],
   },
   {
     id: '3',
-    username: 'Alexderelite',
+    username: 'alexderelite',
     email: 'alexderelite@gmail.com',
     // Password: "12345"
     passwordHash: '$2b$10$W.tfBjBIpMktaYnN6VvXduKwXMWysTlGE1.fsGXACjNd.aE8GQBTq',
     role: 'client',
-    reportIds: ['informe-alexderelite'],
+    reportIds: ['finance-controlling'],
+    rlsRoles: ['Empresa 02'],
   },
   {
     id: '4',
@@ -101,43 +111,31 @@ export const USERS: UserConfig[] = [
     passwordHash: '$2b$10$W.tfBjBIpMktaYnN6VvXduKwXMWysTlGE1.fsGXACjNd.aE8GQBTq',
     role: 'client',
     reportIds: ['informe-webinar'],
+    rlsRoles: ['Permisos'],
   },
 ];
 
 // ---------------------------------------------------------------------------
 // REPORTS
-// To add a new report:
-//   1. Add an entry below with the workspaceId and reportId from Power BI.
-//   2. If the report uses RLS, add rlsUsername and rlsRoles.
-//   3. Assign the report 'id' to the user(s) who should see it.
 // ---------------------------------------------------------------------------
 export const REPORTS: ReportConfig[] = [
   {
-    id: 'informe-alexis',
-    displayName: 'Mi Informe de PBI',
+    id: 'finance-controlling',
+    displayName: 'Finance Controlling',
     workspaceId: 'c34b3294-3de8-48db-a670-139b2e0a4741',
     reportId: 'e157b1cd-919b-4644-8cd1-aaa4a497e134',
-    rlsUsername: 'alexis.albacete@seidor.com',
-    rlsRoles: ['Empresa 10'],
-  },
-  {
-    id: 'informe-alexderelite',
-    displayName: 'Dashboard Empresa 02',
-    workspaceId: 'c34b3294-3de8-48db-a670-139b2e0a4741',
-    reportId: 'e157b1cd-919b-4644-8cd1-aaa4a497e134',
-    rlsUsername: 'alexderelite@gmail.com',
-    rlsRoles: ['Empresa 02'],
+    // RLS dinámico: El email lo pondrá el sistema automáticamente (session.user.email)
+    rlsRoles: ['Empresa 01', 'Empresa 02'], // Listamos los roles posibles para info
+    adminRlsRoles: ['Empresa 01', 'Empresa 02'], // Forzamos que el admin también use RLS para este report
+    adminRlsUsername: 'admin'
   },
   {
     id: 'informe-webinar',
     displayName: 'Informe Webinar',
-    workspaceId: 'c34b3294-3de8-48db-a670-139b2e0a4741', // Misma área de trabajo
+    workspaceId: 'c34b3294-3de8-48db-a670-139b2e0a4741',
     reportId: '7edc7252-cf0c-4185-a0a9-b365153697d7',
-    // Si el dataset tiene RLS, PBI obliga a usarlo. Usamos 'Permisos'
-    rlsUsername: 'alexis.albacete@seidor.com',
     rlsRoles: ['Permisos'],
-    // Y forzamos que el admin use estos para verlo todo
-    adminRlsUsername: 'alexis.albacete@seidor.com',
+    // Forzamos que el admin también use RLS para este report
     adminRlsRoles: ['Permisos'],
   },
 ];

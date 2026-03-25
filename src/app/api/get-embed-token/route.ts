@@ -47,13 +47,63 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Report configuration not found' }, { status: 404 });
     }
 
-    // 5. Generate embed token — Always pass RLS if configured.
-    // Power BI REST API strictly requires an effective identity for any dataset that has RLS enabled, even for Service Principals.
+    // 5. Generate embed token — Dynamic RLS mapping
+    // - For admin: prioritize explicit adminRlsRoles/adminRlsUsername, then fallback to report-wide roles and environmental admin username
+    // - For non-admin: use intersection between user-assigned rank roles and report-allowed roles; fall back to report role list when user roles are missing
+    let rlsUsername: string | undefined;
+    let rlsRoles: string[] | undefined;
+
+    const reportRlsRoles = reportConfig.rlsRoles && reportConfig.rlsRoles.length > 0 ? reportConfig.rlsRoles : undefined;
+
+    if (isAdmin) {
+      const adminRlsRolesDefined = reportConfig.adminRlsRoles && reportConfig.adminRlsRoles.length > 0;
+      const rlsRolesSource = adminRlsRolesDefined ? reportConfig.adminRlsRoles : reportRlsRoles;
+      if (rlsRolesSource) {
+        rlsRoles = rlsRolesSource;
+        rlsUsername = reportConfig.adminRlsUsername ?? session.user.email ?? process.env.POWERBI_RLS_ADMIN_USERNAME ?? undefined;
+      }
+    } else {
+      if (reportRlsRoles) {
+        const userRlsRoles = session.user.rlsRoles ?? [];
+        if (userRlsRoles.length > 0) {
+          const filteredRoles = userRlsRoles.filter((role) => reportRlsRoles.includes(role));
+          if (filteredRoles.length > 0) {
+            rlsRoles = filteredRoles;
+          }
+        }
+
+        if (!rlsRoles) {
+          // No user-specific roles matched, use report default roles (if we want to avoid unauthorized bypass)
+          rlsRoles = reportRlsRoles;
+        }
+
+        rlsUsername = session.user.email ?? undefined;
+      }
+    }
+
+    // DEBUG: log RLS selection details to track effective identity path in token generation.
+    console.log('get-embed-token:', {
+      userId: session.user.id,
+      email: session.user.email,
+      role,
+      requestedReportId,
+      isAdmin,
+      rlsUsername,
+      rlsRoles,
+      reportConfigRls: reportConfig.rlsRoles,
+      reportConfigAdminRls: reportConfig.adminRlsRoles,
+      reportConfigAdminRlsUsername: reportConfig.adminRlsUsername,
+    });
+
+    if (rlsRoles && rlsRoles.length > 0 && !rlsUsername) {
+      return NextResponse.json({ error: 'Forbidden: RLS requires an effective identity for this report' }, { status: 403 });
+    }
+
     const embedConfig = await getEmbedToken({
       workspaceId: reportConfig.workspaceId,
       reportId: reportConfig.reportId,
-      rlsUsername: isAdmin ? (reportConfig.adminRlsUsername ?? reportConfig.rlsUsername) : reportConfig.rlsUsername,
-      rlsRoles: isAdmin ? (reportConfig.adminRlsRoles ?? reportConfig.rlsRoles) : reportConfig.rlsRoles,
+      rlsUsername,
+      rlsRoles,
     });
 
     return NextResponse.json(embedConfig, { status: 200 });

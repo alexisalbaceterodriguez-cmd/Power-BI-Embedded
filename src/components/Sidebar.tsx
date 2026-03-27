@@ -1,39 +1,32 @@
 'use client';
 
-import { useSession } from 'next-auth/react';
 import Image from 'next/image';
-import { REPORTS, ReportConfig } from '@/config/users.config';
+
+interface PublicReport {
+  id: string;
+  displayName: string;
+}
 
 interface SidebarProps {
+  reports: PublicReport[];
   activeReportId: string | null;
   onSelectReport: (reportId: string) => void;
 }
 
-export default function Sidebar({ activeReportId, onSelectReport }: SidebarProps) {
-  const { data: session } = useSession();
-  const role = session?.user?.role;
-  const userReportIds = session?.user?.reportIds ?? [];
-
-  // Build the list of accessible reports
-  const accessibleReports: ReportConfig[] =
-    role === 'admin' || userReportIds.includes('*')
-      ? REPORTS
-      : REPORTS.filter((r) => userReportIds.includes(r.id));
-
+export default function Sidebar({ reports, activeReportId, onSelectReport }: SidebarProps) {
   return (
     <aside className="app-sidebar" aria-label="Informes disponibles">
-      {/* Brand Header */}
       <div className="sidebar-header">
         <Image src="/LOGO_COLOR_POSITIVE.webp" alt="Seidor Logo" width={130} height={40} style={{ objectFit: 'contain' }} priority />
       </div>
 
-      <p className="sidebar-section-title">Análisis de Transformación</p>
+      <p className="sidebar-section-title">Analisis de Transformacion</p>
 
-      {accessibleReports.length === 0 ? (
-        <p className="sidebar-empty">No tienes activos digitales asignados a tu plataforma todavía.</p>
+      {reports.length === 0 ? (
+        <p className="sidebar-empty">No tienes activos digitales asignados a tu plataforma todavia.</p>
       ) : (
         <nav className="sidebar-nav" aria-label="Lista de informes">
-          {accessibleReports.map((report) => (
+          {reports.map((report) => (
             <button
               key={report.id}
               id={`report-nav-${report.id}`}
@@ -55,7 +48,6 @@ export default function Sidebar({ activeReportId, onSelectReport }: SidebarProps
         </nav>
       )}
 
-      {/* Footer Branding T&T */}
       <div className="sidebar-footer">
         <p className="sidebar-division">
           Powered by

@@ -1,8 +1,5 @@
 /**
- * powerbi.ts — Power BI Service (multi-report + RLS support)
- *
- * All Azure AD and Power BI REST calls stay server-side.
- * Compatible with Node.js runtime (not edge) for full bcrypt/NextAuth support.
+ * powerbi.ts - Power BI service integration.
  */
 
 export interface PowerBIEmbedConfig {
@@ -16,23 +13,57 @@ export interface PowerBIEmbedConfig {
 interface EmbedTokenOptions {
   workspaceId: string;
   reportId: string;
-  /** UPN for RLS identity (e.g. 'user@empresa.com'). Omit for admin/no-RLS. */
   rlsUsername?: string;
-  /** Role names defined in Power BI Desktop. Required when rlsUsername is provided. */
   rlsRoles?: string[];
 }
 
-/**
- * Acquires an Azure AD access token using Client Credentials flow.
- * Uses native fetch — compatible with both Node.js and Edge environments.
- */
+interface AzureTokenCache {
+  token: string;
+  expiresAtMs: number;
+}
+
+let azureTokenCache: AzureTokenCache | null = null;
+
+export class PowerBIServiceError extends Error {
+  statusCode: number;
+  publicMessage: string;
+
+  constructor(message: string, publicMessage: string, statusCode = 500) {
+    super(message);
+    this.statusCode = statusCode;
+    this.publicMessage = publicMessage;
+  }
+}
+
+async function safeJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function cachedAzureToken(): string | null {
+  if (!azureTokenCache) return null;
+  const safetyWindowMs = 60 * 1000;
+  if (Date.now() + safetyWindowMs >= azureTokenCache.expiresAtMs) return null;
+  return azureTokenCache.token;
+}
+
 async function getAzureToken(): Promise<string> {
+  const cached = cachedAzureToken();
+  if (cached) return cached;
+
   const tenantId = process.env.TENANT_ID;
   const clientId = process.env.CLIENT_ID;
   const clientSecret = process.env.CLIENT_SECRET;
 
   if (!tenantId || !clientId || !clientSecret) {
-    throw new Error('Missing Azure AD environment variables (TENANT_ID, CLIENT_ID, CLIENT_SECRET).');
+    throw new PowerBIServiceError(
+      'Missing Azure AD env vars.',
+      'Power BI service is not configured.',
+      500
+    );
   }
 
   const params = new URLSearchParams({
@@ -42,62 +73,70 @@ async function getAzureToken(): Promise<string> {
     grant_type: 'client_credentials',
   });
 
-  const response = await fetch(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: params.toString(),
-    }
-  );
+  const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+    cache: 'no-store',
+  });
 
   if (!response.ok) {
-    const err = await response.json();
-    throw new Error(`Azure AD token error: ${JSON.stringify(err)}`);
+    const payload = await safeJson(response);
+    throw new PowerBIServiceError(
+      `Azure token request failed (${response.status}): ${JSON.stringify(payload)}`,
+      'Authentication with Power BI provider failed.',
+      502
+    );
   }
 
-  const data = await response.json();
-  if (!data.access_token) throw new Error('Azure AD token missing in response.');
+  const data = (await response.json()) as { access_token?: string; expires_in?: number };
+  if (!data.access_token) {
+    throw new PowerBIServiceError('Azure token missing.', 'Authentication with Power BI provider failed.', 502);
+  }
+
+  const expiresInSec = typeof data.expires_in === 'number' ? data.expires_in : 3600;
+  azureTokenCache = {
+    token: data.access_token,
+    expiresAtMs: Date.now() + expiresInSec * 1000,
+  };
+
   return data.access_token;
 }
 
-/**
- * Fetches an Embed Token for a Power BI report.
- *
- * If rlsUsername + rlsRoles are provided, the token will enforce Row-Level Security.
- * The rlsUsername must match the identity configured in the report's RLS roles
- * in Power BI Desktop (DAX: USERPRINCIPALNAME()).
- *
- * @param options - Report identifiers and optional RLS settings.
- * @returns PowerBIEmbedConfig payload for the frontend.
- */
 export async function getEmbedToken(options: EmbedTokenOptions): Promise<PowerBIEmbedConfig> {
   const { workspaceId, reportId, rlsUsername, rlsRoles } = options;
 
   if (!workspaceId || !reportId) {
-    throw new Error('workspaceId and reportId are required.');
+    throw new PowerBIServiceError('workspaceId/reportId missing.', 'Invalid report configuration.', 400);
   }
 
   const accessToken = await getAzureToken();
 
-  // 1. Fetch report details (embedUrl + datasetId)
   const reportResponse = await fetch(
     `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/reports/${reportId}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    }
   );
 
   if (!reportResponse.ok) {
-    const err = await reportResponse.json();
-    throw new Error(`Power BI report fetch error: ${JSON.stringify(err)}`);
+    const payload = await safeJson(reportResponse);
+    throw new PowerBIServiceError(
+      `Power BI report metadata request failed (${reportResponse.status}): ${JSON.stringify(payload)}`,
+      'Unable to access requested report.',
+      reportResponse.status === 404 ? 404 : 502
+    );
   }
 
-  const reportData = await reportResponse.json();
-  const embedUrl: string = reportData.embedUrl;
-  const datasetId: string = reportData.datasetId;
+  const reportData = (await reportResponse.json()) as { embedUrl?: string; datasetId?: string };
 
-  // 2. Build GenerateToken body — include RLS identities if provided
+  if (!reportData.embedUrl || !reportData.datasetId) {
+    throw new PowerBIServiceError('Power BI response missing embedUrl/datasetId.', 'Invalid report metadata.', 502);
+  }
+
   const generateTokenBody: Record<string, unknown> = {
-    datasets: [{ id: datasetId }],
+    datasets: [{ id: reportData.datasetId }],
     reports: [{ id: reportId }],
     targetWorkspaces: [{ id: workspaceId }],
   };
@@ -107,36 +146,41 @@ export async function getEmbedToken(options: EmbedTokenOptions): Promise<PowerBI
       {
         username: rlsUsername,
         roles: rlsRoles,
-        datasets: [datasetId],
+        datasets: [reportData.datasetId],
       },
     ];
   }
 
-  // 3. Generate the Embed Token
-  const embedTokenResponse = await fetch(
-    'https://api.powerbi.com/v1.0/myorg/GenerateToken',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(generateTokenBody),
-    }
-  );
+  const embedTokenResponse = await fetch('https://api.powerbi.com/v1.0/myorg/GenerateToken', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(generateTokenBody),
+    cache: 'no-store',
+  });
 
   if (!embedTokenResponse.ok) {
-    const err = await embedTokenResponse.json();
-    throw new Error(`Power BI GenerateToken error: ${JSON.stringify(err)}`);
+    const payload = await safeJson(embedTokenResponse);
+    throw new PowerBIServiceError(
+      `Power BI GenerateToken failed (${embedTokenResponse.status}): ${JSON.stringify(payload)}`,
+      'Unable to issue embed token for this report.',
+      502
+    );
   }
 
-  const embedTokenData = await embedTokenResponse.json();
+  const embedTokenData = (await embedTokenResponse.json()) as {
+    tokenId: string;
+    token: string;
+    expiration: string;
+  };
 
   return {
     tokenId: embedTokenData.tokenId,
     token: embedTokenData.token,
     expiration: embedTokenData.expiration,
-    embedUrl,
+    embedUrl: reportData.embedUrl,
     reportId,
   };
 }

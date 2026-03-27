@@ -1,57 +1,56 @@
-# Power BI Embedded Next.js Viewer
+# Power BI Embedded Next.js Viewer (Hardened)
 
-This is a modern Next.js 15 application designed to securely embed Power BI reports using the **App Owns Data** strategy. It features a dual authentication system: local credentials for quick access and **Microsoft Entra ID (Azure AD)** for enterprise-grade security and B2B guest support.
+Aplicacion Next.js 16 para embebido Power BI (App Owns Data) con:
 
-## Features
+- Microsoft Entra ID como autenticacion principal.
+- Fallback local opcional y endurecido (rate limit + lockout progresivo + politica de password).
+- Autorizacion y asignaciones en SQLite (DAL server-only).
+- Panel admin basico en `/admin` para alta de usuarios/reportes.
+- API protegida de embed token con errores sanitizados.
 
-- **Next.js 15 App Router**: Clean architecture supporting static rendering and Middleware protection.
-- **Dual Authentication**: 
-  - **Microsoft Entra ID**: Native integration for corporate accounts and invited guests.
-  - **Credentials Flow**: Local user mapping for non-Azure users.
-- **Strict Security Mapping**: Only users explicitly defined in `src/config/users.config.ts` can access the platform, even when using Microsoft login.
-- **Edge Compatible API**: The `/api/get-embed-token` route is decoupled from heavyweight Node.js libraries, ensuring 100% compatibility with **Cloudflare Pages** and Vercel Edge.
-- **Power BI Client React**: Seamless UI lifecycle integration with automatic token retrieval.
-- **Premium Corporate UI**: Dark-themed, responsive interface tailored for Seidor corporate identity.
-
----
-
-## 🚀 Setup Instructions
-
-### 1. Azure Active Directory (Entra ID) Requirements
-You must prepare an **App Registration** and grant it access to your Power BI Workspace:
-
-1. Portal de Azure -> **App Registrations** -> **New registration**.
-2. **Redirect URI**: Add `http://localhost:3000/api/auth/callback/microsoft-entra-id` (for local testing) and your production URL.
-3. Copy **Application (client) ID** and **Directory (tenant) ID**.
-4. Create a **Client Secret** and copy its value.
-5. **Power BI Setup**: Enable *Allow service principals to use Power BI APIs* in the Admin Portal and add the App as **Member/Admin** in your Workspace.
-
-### 2. Local Environment Variables
-Create a `.env.local` file based on `.env.local.example`:
+## Variables de entorno
 
 ```env
-TENANT_ID="your_tenant_id"
-CLIENT_ID="your_client_id"
-CLIENT_SECRET="your_client_secret"
-WORKSPACE_ID="your_workspace_id"
-REPORT_ID="your_report_id"
+# Power BI / Azure AD Service Principal
+TENANT_ID="..."
+CLIENT_ID="..."
+CLIENT_SECRET="..."
 
-# NextAuth Configuration
-NEXTAUTH_SECRET="random_32_char_string"
-NEXTAUTH_URL="http://localhost:3000"
+# Auth.js
+NEXTAUTH_SECRET="<random-32+>"
+NEXTAUTH_URL="https://tu-dominio"
+AUTH_MICROSOFT_ENTRA_ID_ID="..."
+AUTH_MICROSOFT_ENTRA_ID_SECRET="..."
+AUTH_MICROSOFT_ENTRA_ID_ISSUER="https://login.microsoftonline.com/<tenant>/v2.0"
 
-# Microsoft Entra ID variables (reuse the same client/tenant IDs)
-AUTH_MICROSOFT_ENTRA_ID_ID="your_client_id"
-AUTH_MICROSOFT_ENTRA_ID_SECRET="your_client_secret"
-AUTH_MICROSOFT_ENTRA_ID_ISSUER="https://login.microsoftonline.com/your_tenant_id/v2.0"
+# Data Layer
+APP_DB_PATH="./data/security.db"
+
+# Bootstrap inicial (opcional)
+BOOTSTRAP_REPORTS_JSON='[{"id":"finance","displayName":"Finance","workspaceId":"...","reportId":"...","rlsRoles":["Empresa 01"]}]'
+BOOTSTRAP_ADMIN_USERNAME="admin"
+BOOTSTRAP_ADMIN_EMAIL="admin@company.com"
+BOOTSTRAP_ADMIN_PASSWORD="StrongPassword!123"
+# o BOOTSTRAP_ADMIN_PASSWORD_HASH="$2b$12$..."
+
+# Politica auth local
+AUTH_ENABLE_LOCAL_FALLBACK="true"
+AUTH_MAX_ATTEMPTS="5"
+AUTH_MAX_LOCK_MINUTES="60"
 ```
 
-### 3. Running Locally
+## Seguridad y despliegue Azure
+
+- No subas secretos a git ni a `.env` compartidos.
+- Guarda secretos en Azure Key Vault y usa Managed Identity desde App Service.
+- Rota inmediatamente cualquier secreto historico expuesto.
+- Verifica `https`, HSTS y cabeceras de seguridad en entorno productivo.
+
+## Comandos
+
 ```bash
+npm install
 npm run dev
+npm run lint
+npm run build
 ```
-
----
-
-## 📖 Documentation
-Detailed configuration for Users, Reports, and RLS can be found in [MANUAL_CONFIGURACION.md](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/MANUAL_CONFIGURACION.md).

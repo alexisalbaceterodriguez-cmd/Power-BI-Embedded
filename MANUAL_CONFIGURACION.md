@@ -1,123 +1,217 @@
-# Manual de Configuración: Usuarios, Informes y Row-Level Security (RLS)
+# Manual Operativo de Usuarios, Permisos y RLS
 
-Este proyecto está diseñado para funcionar **sin necesidad de una base de datos externa**. Toda la configuración de clientes, informes a los que tienen acceso, y políticas de seguridad (RLS) se define en un único lugar: el archivo `src/config/users.config.ts`.
+Este manual explica, paso a paso, como administrar el portal:
 
----
+1. Crear usuarios.
+2. Borrar usuarios.
+3. Dar o quitar permisos de informes.
+4. Configurar RLS.
+5. Resolver incidencias frecuentes.
 
-## 🔒 1. Cómo añadir un Nuevo Usuario
-
-Para añadir un usuario que pueda iniciar sesión en la plataforma, debes editar el array `USERS` en el archivo `src/config/users.config.ts`.
-
-### Pasos:
-
-1. **Generar la contraseña encriptada (Hash):**
-   Por seguridad, las contraseñas no se guardan en texto plano. Se usa el algoritmo `bcrypt`. 
-   Para generar el hash de una nueva contraseña, abre una terminal cualquiera con Node.js instalado y ejecuta:
-   ```bash
-   node -e "console.log(require('bcryptjs').hashSync('LA_CONTRASENA_AQUI', 10))"
-   ```
-   Copia el resultado (empezará por `$2b$10$...`).
-
-2. **Añadir el objeto al array `USERS`:**
-   Abre `src/config/users.config.ts` y añade una entrada como esta al array `USERS`:
-
-   ```typescript
-   {
-     id: '3', // Un ID único (puede ser numérico o texto corto)
-     username: 'cliente_nuevo', // Nombre que usará para hacer login
-     passwordHash: '$2b$10$TU_HASH_PEGADO_AQUI...', // El hash que generaste en el paso 1
-     role: 'client', // 'client' (cliente normal) o 'admin' (superusuario)
-     reportIds: ['report-ventas-2026', 'report-marketing-2026'], // IDs de los informes que este usuario puede ver
-   }
-   ```
-
-> **💡 Sobre el Rol `admin`:** Si cambias `role` a `'admin'` y pones `reportIds: ['*']`, ese usuario tendrá acceso automáticamente a **todos** los informes definidos, y **se ignorarán las reglas RLS** (verá los datos completos de todos los clientes sin filtros).
+La fuente de verdad es la base SQLite definida en `APP_DB_PATH` (por defecto `./data/security.db`).
 
 ---
 
-## 📊 2. Cómo añadir un Nuevo Informe de Power BI
+## 1) Requisitos previos
 
-Cuando publicas un informe en el Servicio de Power BI y quieres que aparezca en esta plataforma, debes registrarlo en el array `REPORTS` dentro de `src/config/users.config.ts`.
+1. Arranca la aplicacion:
+   - `npm run dev`
+2. Entra con un usuario `admin`.
+3. Abre el panel de administracion:
+   - `http://localhost:3000/admin`
 
-### Pasos:
-
-1. **Obtener los IDs de Power BI:**
-   Ve a la web de Power BI, entra a tu Área de Trabajo (Workspace) y luego abre el Informe. Fíjate en la URL de tu navegador:
-   `https://app.powerbi.com/groups/TU_WORKSPACE_ID_AQUI/reports/TU_REPORT_ID_AQUI/ReportSection`
-
-2. **Añadir el objeto al array `REPORTS`:**
-
-   ```typescript
-   {
-     id: 'report-ventas-2026', // ID interno para usar en la lista de reportIds de los usuarios
-     displayName: 'Ventas Globales 2026', // Nombre bonito que aparecerá en el menú lateral amarillo de la web
-     workspaceId: 'TU_WORKSPACE_ID_AQUI', // El GUID largo sacado de la URL
-     reportId: 'TU_REPORT_ID_AQUI', // El GUID largo sacado de la URL
-   }
-   ```
-
-3. **Asignarlo al usuario:**
-   Asegúrate de que el `id` interno que definiste arriba (`report-ventas-2026`) esté incluido en el array `reportIds` de los usuarios que quieras que puedan hacer click en él.
+Tablas principales de seguridad:
+- `users`
+- `reports`
+- `user_report_access`
+- `user_rls_roles`
+- `auth_attempts`
+- `audit_log`
 
 ---
 
-## 🛡️ 3. Cómo configurar RLS (Row-Level Security)
+## 2) Crear un usuario (metodo recomendado: panel /admin)
 
-La **RLS** permite que un único informe de Power BI filtre los datos dinámicamente dependiendo de quién lo está mirando.
+En `/admin`, bloque **Alta de usuario local**:
 
-### Requisitos Previos en Power BI Desktop:
-1. En Power BI Desktop, debes crear un **Rol** (por ejemplo, "Vendedor" o "Empresa").
-2. En las reglas DAX de ese rol, debes usar la función `USERPRINCIPALNAME()` para filtrar la tabla. (Ejemplo: `[Email_Cliente] = USERPRINCIPALNAME()`).
-3. Publica el informe al Servicio de Power BI.
+1. `username`: nombre de usuario (ej. `cliente_finance`).
+2. `email`: correo del usuario (obligatorio si usara Microsoft Entra ID).
+3. `role`: `client` o `admin`.
+4. `password`: minimo 12 caracteres con mayuscula, minuscula, numero y simbolo.
+5. `reportIds (csv)`: IDs internos de informes, separados por coma.
+   - Ejemplo: `finance-controlling,informe-webinar`
+6. `rlsRoles (csv)`: roles RLS permitidos para ese usuario.
+   - Ejemplo: `Empresa 01,Permisos`
+7. Pulsa **Crear usuario**.
 
-### Cómo vincular el RLS en el código:
+Comprobacion:
+1. Debe aparecer en el bloque **Usuarios**.
+2. El usuario ya puede iniciar sesion local.
+3. Si tiene `email`, tambien puede iniciar con Microsoft (si su cuenta Entra coincide).
 
-En el array `REPORTS`, al configurar el informe, añade dos propiedades opcionales: `rlsUsername` y `rlsRoles`.
+---
 
-```typescript
-{
-  id: 'report-acme-ventas',
-  displayName: 'ACME Corp - Ventas',
-  workspaceId: 'xxxx-xxxx-xxxx',
-  reportId: 'yyyy-yyyy-yyyy',
-  
-  // CONFIGURACIÓN RLS:
-  rlsUsername: 'acme@empresa.com', // El valor exacto que pasará al DAX USERPRINCIPALNAME()
-  rlsRoles: ['Empresa'], // El nombre exacto del Rol que creaste en PBI Desktop
-}
+## 3) Dar permisos a un usuario existente
+
+Actualmente el panel crea usuarios, pero no edita permisos existentes en la UI.  
+Para cambios de permisos en usuarios ya creados, usa SQL.
+
+### 3.1 Dar acceso a un informe
+
+```sql
+INSERT OR IGNORE INTO user_report_access (user_id, report_id, created_at)
+VALUES ('ID_USUARIO', 'ID_REPORTE', datetime('now'));
 ```
 
-**¿Cómo funciona esto internamente?**
-- Si el usuario que entra hace login como `cliente_acme` (cuyo rol es `client`), el backend generará un Embed Token seguro en Microsoft Azure pasándole a Power BI explícitamente la orden: *"Genera el token bajo la identidad de acme@empresa.com usando el rol Empresa"*.
-- Si el usuario que hace login tiene el rol `admin`, la plataforma **ignorará** la configuración RLS y pedirá el token sin filtros, viendo la información de `acme@empresa.com` y la de todos los demás.
+### 3.2 Quitar acceso a un informe
 
----
-
-## 📝 Resumen del Flujo de Trabajo
-
-1. **Publicas** el informe desde PBI Desktop (con roles si quieres RLS).
-2. **Copias** de la URL el WorkspaceID y el ReportID.
-3. Vas a `users.config.ts`.
-4. Añades un bloque nuevo en `REPORTS` con esos IDs (y añades `rlsUsername/rlsRoles` si filtra por usuario).
-5. En ese mismo archivo, buscas al usuario en `USERS` y le añades el `id` que le pusiste al informe a su lista `reportIds`.
-6. ¡Listo! Al refrescar la web el usuario verá su nuevo menú en la barra lateral.
-
----
-
-## 🔑 4. Autenticación con Microsoft Entra ID (Azure AD)
-
-La aplicación soporta inicio de sesión nativo e integrado con Microsoft Entra ID (para invitados B2B y usuarios corporativos).
-Para que un usuario pueda iniciar sesión con Microsoft, su correo electrónico **debe estar dado de alta** en el array `USERS` de `src/config/users.config.ts`.
-
-### Configuración de Variables de Entorno
-
-En tu portal de Azure, asegúrate de registrar una aplicación (App Registration) y configurar una clave secreta.
-Luego, en tu archivo `.env.local` (o en tu servicio de hosting), añade las siguientes variables:
-
-```env
-AUTH_MICROSOFT_ENTRA_ID_ID="tu-client-id"
-AUTH_MICROSOFT_ENTRA_ID_SECRET="tu-client-secret"
-AUTH_MICROSOFT_ENTRA_ID_ISSUER="https://login.microsoftonline.com/tu-tenant-id/v2.0"
+```sql
+DELETE FROM user_report_access
+WHERE user_id = 'ID_USUARIO' AND report_id = 'ID_REPORTE';
 ```
 
-Si el usuario inicia sesión con Microsoft pero su correo no existe en la lista de `USERS` autorizados, la plataforma denegará el inicio de sesión por seguridad, redirigiéndolo con un mensaje de acceso denegado.
+### 3.3 Ver permisos actuales
+
+```sql
+SELECT u.username, ura.report_id
+FROM user_report_access ura
+JOIN users u ON u.id = ura.user_id
+ORDER BY u.username, ura.report_id;
+```
+
+---
+
+## 4) Configurar RLS por usuario
+
+Regla actual del sistema:
+- Si el informe tiene RLS, el usuario debe tener interseccion entre sus roles y los del informe.
+- Si no hay interseccion, devuelve `403`.
+
+### 4.1 Asignar roles RLS al usuario
+
+```sql
+INSERT OR IGNORE INTO user_rls_roles (user_id, role_name, created_at)
+VALUES ('ID_USUARIO', 'Empresa 01', datetime('now'));
+```
+
+### 4.2 Quitar un rol RLS al usuario
+
+```sql
+DELETE FROM user_rls_roles
+WHERE user_id = 'ID_USUARIO' AND role_name = 'Empresa 01';
+```
+
+### 4.3 Ver roles RLS actuales por usuario
+
+```sql
+SELECT u.username, urr.role_name
+FROM user_rls_roles urr
+JOIN users u ON u.id = urr.user_id
+ORDER BY u.username, urr.role_name;
+```
+
+---
+
+## 5) Borrar un usuario
+
+Al borrar en `users`, se eliminan automaticamente permisos y roles RLS asociados por `ON DELETE CASCADE`.
+
+```sql
+DELETE FROM users
+WHERE id = 'ID_USUARIO';
+```
+
+Recomendacion: nunca borres el unico admin.
+
+Consulta previa sugerida:
+
+```sql
+SELECT id, username, email, role, is_active
+FROM users
+ORDER BY username;
+```
+
+---
+
+## 6) Crear o borrar informes
+
+### 6.1 Crear informe (UI)
+
+En `/admin`, bloque **Alta de reporte**:
+1. `id`: identificador interno (ej. `informe-webinar`).
+2. `displayName`: nombre visible.
+3. `workspaceId`: GUID del workspace Power BI.
+4. `reportId`: GUID del informe Power BI.
+5. `rlsRoles (csv)`: roles permitidos en ese informe.
+6. `adminRlsRoles (csv)` y `adminRlsUsername` (opcionales).
+7. Pulsa **Crear reporte**.
+
+### 6.2 Borrar informe (SQL)
+
+```sql
+DELETE FROM reports
+WHERE id = 'ID_REPORTE';
+```
+
+Esto elimina tambien accesos asociados en `user_report_access`.
+
+---
+
+## 7) Gestion de cuentas Microsoft Entra ID
+
+Para login Microsoft, el usuario de BD debe tener `email` que coincida con alguno de estos claims de Entra:
+- `email`
+- `preferred_username`
+- `upn`
+- `unique_name`
+
+Si un usuario Microsoft recibe `AccessDenied`:
+1. Comprueba que existe en `users`.
+2. Comprueba que `email` en BD coincide exactamente con su cuenta Entra.
+3. Verifica que `is_active = 1`.
+
+---
+
+## 8) Operativa recomendada (flujo diario)
+
+1. Crear informe nuevo (si aplica).
+2. Crear usuario.
+3. Asignar `reportIds`.
+4. Asignar `rlsRoles`.
+5. Probar login con ese usuario.
+6. Revisar `audit_log` si hay incidencias.
+
+---
+
+## 9) Troubleshooting rapido
+
+### 9.1 `Forbidden` al cargar informe
+- El usuario no tiene permiso en `user_report_access`, o
+- No tiene interseccion de `rlsRoles` con el informe.
+
+### 9.2 Usuario entra pero no ve informes
+- No tiene filas en `user_report_access`, o
+- Los informes estan inactivos.
+
+### 9.3 Login Microsoft no deja cambiar cuenta
+- El sistema ya fuerza selector de cuenta (`prompt=select_account`).
+- Si persiste, cerrar sesion de Microsoft en el navegador y reintentar.
+
+### 9.4 Bloqueo por intentos fallidos
+- Se aplica lockout progresivo en login local.
+- Esperar ventana de bloqueo o reiniciar contador borrando fila en `auth_attempts`.
+
+```sql
+DELETE FROM auth_attempts
+WHERE attempt_key LIKE '%|NOMBRE_USUARIO';
+```
+
+---
+
+## 10) Seguridad minima obligatoria
+
+1. Rotar secretos expuestos y no compartir `.env.local`.
+2. Cambiar `NEXTAUTH_SECRET` por uno robusto.
+3. En Azure: usar Key Vault + Managed Identity.
+4. Mantener Microsoft Entra como login principal.
+5. Revisar `audit_log` periodicamente.

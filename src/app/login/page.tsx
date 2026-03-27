@@ -23,7 +23,11 @@ function LoginContent() {
   async function handleMicrosoftLogin() {
     setError(null);
     setMicrosoftLoading(true);
-    await signIn('microsoft-entra-id', { callbackUrl: '/' });
+    await signIn(
+      'microsoft-entra-id',
+      { callbackUrl: '/' },
+      { prompt: 'select_account' }
+    );
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -67,6 +71,26 @@ function LoginContent() {
             {error}
           </div>
         )}
+        {urlError === 'AccessDenied' ? (
+          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="logout-btn"
+              onClick={() => router.replace('/login')}
+            >
+              Volver
+            </button>
+            <button
+              type="button"
+              className="login-btn"
+              onClick={handleMicrosoftLogin}
+              disabled={microsoftLoading || loading}
+              style={{ marginTop: 0 }}
+            >
+              Probar con otra cuenta
+            </button>
+          </div>
+        ) : null}
 
         {/* Microsoft Sign-In Button */}
         <button

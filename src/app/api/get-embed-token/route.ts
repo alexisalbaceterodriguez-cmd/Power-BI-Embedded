@@ -1,104 +1,95 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
-import { getEmbedToken } from '@/services/powerbi';
-import { REPORTS } from '@/config/users.config';
+import { getEmbedToken, PowerBIServiceError } from '@/services/powerbi';
+import { getSecureReportConfigForUser, recordAuditEvent } from '@/lib/dal';
 
-/**
- * GET /api/get-embed-token?reportId=<id>
- *
- * Requires an active session. Validates that the requested report ID
- * is authorized for the current user, then returns a Power BI embed token
- * (with optional RLS identities for client users).
- */
 export const runtime = 'nodejs';
 
+function getClientIp(request: NextRequest): string | undefined {
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded) {
+    return forwarded.split(',')[0]?.trim();
+  }
+  return request.headers.get('x-real-ip') ?? undefined;
+}
+
 export async function GET(request: NextRequest) {
-  try {
-    // 1. Verify session
-    const session = await auth();
-    if (!session || !session.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  const ip = getClientIp(request);
+  const session = await auth();
 
-    const { role, reportIds } = session.user;
+  if (!session?.user?.id || !session.user.role) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
-    // 2. Parse requested reportId from query string
-    const { searchParams } = new URL(request.url);
-    const requestedReportId = searchParams.get('reportId');
+  const requestedReportId = request.nextUrl.searchParams.get('reportId');
+  if (!requestedReportId) {
+    return NextResponse.json({ error: 'Missing reportId parameter' }, { status: 400 });
+  }
 
-    if (!requestedReportId) {
-      return NextResponse.json({ error: 'Missing reportId parameter' }, { status: 400 });
-    }
+  const reportConfig = await getSecureReportConfigForUser({
+    userId: session.user.id,
+    role: session.user.role,
+    requestedReportId,
+  });
 
-    // 3. Validate the user has access to this report
-    const isAdmin = role === 'admin';
-    const hasAccess =
-      isAdmin ||
-      reportIds.includes('*') ||
-      reportIds.includes(requestedReportId);
-
-    if (!hasAccess) {
-      return NextResponse.json({ error: 'Forbidden: Report not assigned to this user' }, { status: 403 });
-    }
-
-    // 4. Look up the report configuration
-    const reportConfig = REPORTS.find((r) => r.id === requestedReportId);
-    if (!reportConfig) {
-      return NextResponse.json({ error: 'Report configuration not found' }, { status: 404 });
-    }
-
-    // 5. Generate embed token — Dynamic RLS mapping
-    // - For admin: prioritize explicit adminRlsRoles/adminRlsUsername, then fallback to report-wide roles and environmental admin username
-    // - For non-admin: use intersection between user-assigned rank roles and report-allowed roles; fall back to report role list when user roles are missing
-    let rlsUsername: string | undefined;
-    let rlsRoles: string[] | undefined;
-
-    const reportRlsRoles = reportConfig.rlsRoles && reportConfig.rlsRoles.length > 0 ? reportConfig.rlsRoles : undefined;
-
-    if (isAdmin) {
-      const adminRlsRolesDefined = reportConfig.adminRlsRoles && reportConfig.adminRlsRoles.length > 0;
-      const rlsRolesSource = adminRlsRolesDefined ? reportConfig.adminRlsRoles : reportRlsRoles;
-      if (rlsRolesSource) {
-        rlsRoles = rlsRolesSource;
-        rlsUsername = reportConfig.adminRlsUsername ?? session.user.email ?? process.env.POWERBI_RLS_ADMIN_USERNAME ?? undefined;
-      }
-    } else {
-      if (reportRlsRoles) {
-        const userRlsRoles = session.user.rlsRoles ?? [];
-        if (userRlsRoles.length > 0) {
-          const filteredRoles = userRlsRoles.filter((role) => reportRlsRoles.includes(role));
-          if (filteredRoles.length > 0) {
-            rlsRoles = filteredRoles;
-          }
-        }
-
-        if (!rlsRoles) {
-          // No user-specific roles matched, use report default roles (if we want to avoid unauthorized bypass)
-          rlsRoles = reportRlsRoles;
-        }
-
-        rlsUsername = session.user.email ?? undefined;
-      }
-    }
-
-    // DEBUG: log RLS selection details to track effective identity path in token generation.
-    console.log('get-embed-token:', {
+  if (!reportConfig) {
+    await recordAuditEvent({
+      eventType: 'embed.denied',
       userId: session.user.id,
-      email: session.user.email,
-      role,
-      requestedReportId,
-      isAdmin,
-      rlsUsername,
-      rlsRoles,
-      reportConfigRls: reportConfig.rlsRoles,
-      reportConfigAdminRls: reportConfig.adminRlsRoles,
-      reportConfigAdminRlsUsername: reportConfig.adminRlsUsername,
+      ip,
+      detail: { requestedReportId },
     });
 
-    if (rlsRoles && rlsRoles.length > 0 && !rlsUsername) {
-      return NextResponse.json({ error: 'Forbidden: RLS requires an effective identity for this report' }, { status: 403 });
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  const isAdmin = session.user.role === 'admin';
+
+  let rlsUsername: string | undefined;
+  let rlsRoles: string[] | undefined;
+
+  const reportRlsRoles = reportConfig.rlsRoles && reportConfig.rlsRoles.length > 0 ? reportConfig.rlsRoles : undefined;
+
+  if (isAdmin) {
+    const adminRlsRolesDefined = reportConfig.adminRlsRoles && reportConfig.adminRlsRoles.length > 0;
+    const roleSource = adminRlsRolesDefined ? reportConfig.adminRlsRoles : reportRlsRoles;
+
+    if (roleSource && roleSource.length > 0) {
+      rlsRoles = roleSource;
+      rlsUsername = reportConfig.adminRlsUsername ?? session.user.email ?? process.env.POWERBI_RLS_ADMIN_USERNAME ?? undefined;
+    }
+  } else if (reportRlsRoles && reportRlsRoles.length > 0) {
+    const userRlsRoles = session.user.rlsRoles ?? [];
+    const intersection = userRlsRoles.filter((role) => reportRlsRoles.includes(role));
+
+    // Hardened behavior: no permissive fallback.
+    if (intersection.length === 0) {
+      await recordAuditEvent({
+        eventType: 'embed.rls_denied',
+        userId: session.user.id,
+        ip,
+        detail: { requestedReportId, reason: 'no_role_intersection' },
+      });
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
+    rlsRoles = intersection;
+    // Some local fallback users do not have email. Keep strict role intersection,
+    // but allow username as effective identity fallback for RLS tokens.
+    rlsUsername = session.user.email ?? session.user.name ?? undefined;
+  }
+
+  if (rlsRoles && rlsRoles.length > 0 && !rlsUsername) {
+    await recordAuditEvent({
+      eventType: 'embed.rls_denied',
+      userId: session.user.id,
+      ip,
+      detail: { requestedReportId, reason: 'missing_effective_identity' },
+    });
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+
+  try {
     const embedConfig = await getEmbedToken({
       workspaceId: reportConfig.workspaceId,
       reportId: reportConfig.reportId,
@@ -106,10 +97,23 @@ export async function GET(request: NextRequest) {
       rlsRoles,
     });
 
+    await recordAuditEvent({
+      eventType: 'embed.issued',
+      userId: session.user.id,
+      ip,
+      detail: {
+        requestedReportId,
+        isAdmin,
+        hasRls: Boolean(rlsRoles && rlsRoles.length > 0),
+      },
+    });
+
     return NextResponse.json(embedConfig, { status: 200 });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Internal Server Error';
-    console.error('API /api/get-embed-token error:', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch (error) {
+    if (error instanceof PowerBIServiceError) {
+      return NextResponse.json({ error: error.publicMessage }, { status: error.statusCode });
+    }
+
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

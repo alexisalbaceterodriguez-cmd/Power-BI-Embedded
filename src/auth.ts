@@ -1,31 +1,55 @@
 /**
- * auth.ts — Auth.js v5 (next-auth@beta) core configuration
- *
- * Located at project root so it can be imported by both API routes and middleware.
+ * auth.ts - Auth.js v5 hardened configuration.
  */
 import NextAuth from 'next-auth';
 import Credentials from 'next-auth/providers/credentials';
 import MicrosoftEntraId from 'next-auth/providers/microsoft-entra-id';
-import bcrypt from 'bcryptjs';
-import { USERS } from '@/config/users.config';
+import {
+  authenticateLocalUser,
+  findUserByMicrosoftClaims,
+  getSessionUserById,
+  recordAuditEvent,
+  SessionAuthUser,
+} from '@/lib/dal';
 
 declare module 'next-auth' {
   interface User {
-    role: string;
+    role: 'admin' | 'client';
     reportIds: string[];
     rlsRoles?: string[];
   }
+
   interface Session {
     user: {
       id: string;
       name?: string | null;
       email?: string | null;
       image?: string | null;
-      role: string;
+      role: 'admin' | 'client';
       reportIds: string[];
       rlsRoles?: string[];
     };
   }
+}
+
+function ipFromRequest(request: Request): string | undefined {
+  const forwarded = request.headers.get('x-forwarded-for');
+  if (forwarded) {
+    const first = forwarded.split(',')[0]?.trim();
+    if (first) return first;
+  }
+  return request.headers.get('x-real-ip') ?? undefined;
+}
+
+function toAuthUser(user: SessionAuthUser) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    reportIds: user.reportIds,
+    rlsRoles: user.rlsRoles,
+  };
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -34,82 +58,144 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID,
       clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
       issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+      authorization: {
+        params: {
+          prompt: 'select_account',
+        },
+      },
     }),
     Credentials({
       name: 'Credentials',
       credentials: {
         username: { label: 'Usuario', type: 'text' },
-        password: { label: 'Contraseña', type: 'password' },
+        password: { label: 'Contrasena', type: 'password' },
       },
-      async authorize(credentials) {
-        const username = credentials?.username as string | undefined;
-        const password = credentials?.password as string | undefined;
+      async authorize(credentials, request) {
+        const username = String(credentials?.username ?? '');
+        const password = String(credentials?.password ?? '');
+        const ip = ipFromRequest(request);
 
-        if (!username || !password) return null;
+        const result = await authenticateLocalUser({
+          username,
+          password,
+          ip,
+        });
 
-        const user = USERS.find((u) => u.username === username);
-        if (!user) return null;
+        if (result.status !== 'ok' || !result.user) {
+          await recordAuditEvent({
+            eventType: 'auth.local.failed',
+            ip,
+            detail: {
+              username,
+              reason: result.status,
+              retryAfterSeconds: result.retryAfterSeconds,
+            },
+          });
+          return null;
+        }
 
-        const isValid = await bcrypt.compare(password, user.passwordHash);
-        if (!isValid) return null;
+        await recordAuditEvent({
+          eventType: 'auth.local.success',
+          userId: result.user.id,
+          ip,
+          detail: { username: result.user.name },
+        });
 
-        return {
-          id: user.id,
-          name: user.username,
-          email: user.email,
-          role: user.role,
-          reportIds: user.reportIds,
-          rlsRoles: user.rlsRoles,
-        };
+        return toAuthUser(result.user);
       },
     }),
   ],
   callbacks: {
-    async signIn({ user, account }) {
-      if (account?.provider === 'microsoft-entra-id') {
-        const email = user.email?.toLowerCase();
-        if (!email) return false;
-
-        const configUser = USERS.find((u) => u.email?.toLowerCase() === email);
-        if (!configUser) {
-          // Reject user if not found in users.config.ts
-          return false;
-        }
+    async signIn({ user, account, profile }) {
+      if (account?.provider !== 'microsoft-entra-id') {
+        return true;
       }
+
+      const profileRecord = (profile ?? {}) as Record<string, unknown>;
+      const claimCandidates = [
+        user.email,
+        typeof profileRecord.email === 'string' ? profileRecord.email : undefined,
+        typeof profileRecord.preferred_username === 'string' ? profileRecord.preferred_username : undefined,
+        typeof profileRecord.upn === 'string' ? profileRecord.upn : undefined,
+        typeof profileRecord.unique_name === 'string' ? profileRecord.unique_name : undefined,
+      ].filter((value): value is string => Boolean(value && value.trim()));
+
+      if (claimCandidates.length === 0) return false;
+
+      const mappedUser = await findUserByMicrosoftClaims(claimCandidates);
+      if (!mappedUser) {
+        await recordAuditEvent({
+          eventType: 'auth.microsoft.denied',
+          detail: { claimCandidates },
+        });
+        return false;
+      }
+
+      user.id = mappedUser.id;
+      user.role = mappedUser.role;
+      user.reportIds = mappedUser.reportIds;
+      user.rlsRoles = mappedUser.rlsRoles;
+
+      await recordAuditEvent({
+        eventType: 'auth.microsoft.success',
+        userId: mappedUser.id,
+        detail: { claimCandidates },
+      });
       return true;
     },
-    async jwt({ token, user, account, profile }) {
-      if (account?.provider === 'microsoft-entra-id' && user?.email) {
-        // Enforce user lookup again for JWT binding
-        const configUser = USERS.find((u) => u.email?.toLowerCase() === user.email?.toLowerCase());
-        if (configUser) {
-          token.id = configUser.id;
-          token.role = configUser.role;
-          token.reportIds = configUser.reportIds;
-          token.rlsRoles = configUser.rlsRoles;
-        }
-      } else if (user) {
-        // Credentials provider
-        token.id = user.id;
-        token.role = user.role;
-        token.reportIds = user.reportIds;
-        token.rlsRoles = user.rlsRoles;
+    async jwt({ token, user }) {
+      if (user) {
+        (token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] }).id = user.id;
+        (token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] }).role = user.role;
+        (token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] }).reportIds = user.reportIds;
+        (token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] }).rlsRoles = user.rlsRoles;
+        return token;
       }
+
+      const enrichedToken = token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] };
+
+      if (enrichedToken.id) {
+        const currentUser = await getSessionUserById(enrichedToken.id);
+        if (currentUser) {
+          enrichedToken.role = currentUser.role;
+          enrichedToken.reportIds = currentUser.reportIds;
+          enrichedToken.rlsRoles = currentUser.rlsRoles;
+        }
+      }
+
       return token;
     },
     async session({ session, token }) {
-      session.user.id = token.id as string;
-      session.user.role = token.role as string;
-      session.user.reportIds = token.reportIds as string[];
-      session.user.rlsRoles = token.rlsRoles as string[] | undefined;
+      const enrichedToken = token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] };
+      if (!enrichedToken.id || !enrichedToken.role) {
+        return session;
+      }
+
+      session.user.id = enrichedToken.id;
+      session.user.role = enrichedToken.role;
+      session.user.reportIds = enrichedToken.reportIds ?? [];
+      session.user.rlsRoles = enrichedToken.rlsRoles;
       return session;
     },
-
   },
   pages: {
     signIn: '/login',
   },
   session: {
     strategy: 'jwt',
+    maxAge: 60 * 60,
+  },
+  trustHost: true,
+  useSecureCookies: process.env.NODE_ENV === 'production',
+  cookies: {
+    sessionToken: {
+      name: process.env.NODE_ENV === 'production' ? '__Secure-authjs.session-token' : 'authjs.session-token',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+      },
+    },
   },
 });

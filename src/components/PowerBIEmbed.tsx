@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { PowerBIEmbed } from 'powerbi-client-react';
 import { models } from 'powerbi-client';
+import { signOut } from 'next-auth/react';
 
 interface EmbeddedReportProps {
   reportId: string;
@@ -26,31 +27,72 @@ export default function EmbeddedReport({ reportId }: EmbeddedReportProps) {
   const [embedConfig, setEmbedConfig] = useState<EmbedConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
     setEmbedConfig(null);
+    let cancelled = false;
+
+    async function fetchWithTimeout(timeoutMs: number): Promise<Response> {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(`/api/get-embed-token?reportId=${encodeURIComponent(reportId)}`, {
+          signal: controller.signal,
+          cache: 'no-store',
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
 
     async function fetchToken() {
       try {
-        const response = await fetch(`/api/get-embed-token?reportId=${encodeURIComponent(reportId)}`);
-        const data = await response.json();
+        let response: Response;
+        let data: unknown;
 
-        if (!response.ok) {
-          throw new Error(data.error || 'Error al cargar el informe');
+        try {
+          response = await fetchWithTimeout(30000);
+          data = await response.json();
+        } catch (firstError: unknown) {
+          if (firstError instanceof DOMException && firstError.name === 'AbortError') {
+            response = await fetchWithTimeout(30000);
+            data = await response.json();
+          } else {
+            throw firstError;
+          }
         }
 
-        setEmbedConfig(data);
+        if (!response.ok) {
+          const maybeError = (data as { error?: string })?.error;
+          throw new Error(maybeError || 'Error al cargar el informe');
+        }
+
+        if (!cancelled) {
+          setEmbedConfig(data as EmbedConfig);
+        }
       } catch (err: unknown) {
+        if (cancelled) return;
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setError('Tiempo de espera agotado al solicitar el informe. Reintenta en unos segundos.');
+          return;
+        }
         setError(err instanceof Error ? err.message : 'Error desconocido');
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
     fetchToken();
-  }, [reportId]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reportId, retryCount]);
 
   if (loading) {
     return (
@@ -62,6 +104,8 @@ export default function EmbeddedReport({ reportId }: EmbeddedReportProps) {
   }
 
   if (error) {
+    const isForbidden = error.toLowerCase().includes('forbidden') || error.toLowerCase().includes('acceso');
+
     return (
       <div className="state-container">
         <svg className="state-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -69,6 +113,16 @@ export default function EmbeddedReport({ reportId }: EmbeddedReportProps) {
         </svg>
         <p className="state-title error-text">Error al cargar el informe</p>
         <p className="state-subtitle">{error}</p>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <button className="login-btn" onClick={() => setRetryCount((value) => value + 1)}>
+            Reintentar
+          </button>
+          {isForbidden ? (
+            <button className="logout-btn" onClick={() => signOut({ callbackUrl: '/login' })}>
+              Cambiar usuario
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }

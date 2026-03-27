@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Set up Node.js version
-      uses: actions/setup-node@v1
+      uses: actions/setup-node@v4
       with:
         node-version: '20.x'
     
@@ -28,9 +28,9 @@ jobs:
         npm run test --if-present
 
     - name: 'Deploy to Azure Web App'
-      uses: azure/webapps-deploy@v2
+      uses: azure/webapps-deploy@v3
       with: 
         app-name: 'pbi-embedded-web-sdma'
         slot-name: 'production'
-        publish-profile: ${{ secrets.AzureAppService_PublishProfile_6959f024f3954168849143ab5d701648 }}
+        publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_6959F024F3954168849143AB5D701648 }}
         package: .

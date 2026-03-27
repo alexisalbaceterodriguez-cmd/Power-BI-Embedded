@@ -2,7 +2,13 @@
 
 import { signOut, useSession } from 'next-auth/react';
 
-export default function Header() {
+interface HeaderProps {
+  showAiLauncher?: boolean;
+  aiAgentCount?: number;
+  onOpenAi?: () => void;
+}
+
+export default function Header({ showAiLauncher = false, aiAgentCount = 0, onOpenAi }: HeaderProps) {
   const { data: session } = useSession();
   const username = session?.user?.name ?? 'Usuario';
   const role = session?.user?.role ?? 'client';
@@ -10,6 +16,26 @@ export default function Header() {
 
   return (
     <header className="app-header">
+      <div className="header-left-slot" aria-hidden={!showAiLauncher}>
+        {showAiLauncher ? (
+          <button className="header-ai-btn" onClick={onOpenAi} aria-label="Abrir agente IA Fabric">
+            <span className="header-ai-face" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
+                <rect x="3" y="7" width="18" height="12" rx="4" fill="#66B6FF" />
+                <circle cx="9" cy="13" r="1.4" fill="#111111" />
+                <circle cx="15" cy="13" r="1.4" fill="#111111" />
+                <path d="M9 16h6" stroke="#111111" strokeWidth="1.5" strokeLinecap="round" />
+                <path d="M12 4v3" stroke="#66B6FF" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </span>
+            <span>Fabric AI</span>
+            <span className="header-ai-count">{aiAgentCount}</span>
+          </button>
+        ) : (
+          <div className="header-ai-placeholder" />
+        )}
+      </div>
+
       {/* User info & logout */}
       <div className="header-user">
         <div className="header-badge">

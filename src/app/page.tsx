@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { signOut, useSession } from 'next-auth/react';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
+import AIAgentDrawer from '@/components/AIAgentDrawer';
 
 const EmbeddedReport = dynamic(() => import('@/components/PowerBIEmbed'), {
   ssr: false,
@@ -13,6 +14,16 @@ const EmbeddedReport = dynamic(() => import('@/components/PowerBIEmbed'), {
 interface PublicReport {
   id: string;
   displayName: string;
+  hasAiAgents?: boolean;
+  aiAgentCount?: number;
+}
+
+interface AgentSummary {
+  id: string;
+  name: string;
+  mcpUrl?: string;
+  mcpToolName?: string;
+  reportIds: string[];
 }
 
 export default function Home() {
@@ -22,6 +33,9 @@ export default function Home() {
   const [reportsError, setReportsError] = useState<string | null>(null);
   const [authLoadingTimedOut, setAuthLoadingTimedOut] = useState(false);
   const [reloadReportsKey, setReloadReportsKey] = useState(0);
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [agentsOpen, setAgentsOpen] = useState(false);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (status !== 'loading') {
@@ -84,6 +98,43 @@ export default function Home() {
     };
   }, [status]);
 
+  useEffect(() => {
+    if (!activeReportId || status !== 'authenticated') {
+      setAgents([]);
+      setAgentsOpen(false);
+      setAgentsError(null);
+      return;
+    }
+    const reportId = activeReportId;
+
+    let cancelled = false;
+
+    async function loadAgentsForReport() {
+      try {
+        setAgentsError(null);
+        const response = await fetch(`/api/ai-agents?reportId=${encodeURIComponent(reportId)}`, {
+          cache: 'no-store',
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error ?? 'No se pudieron cargar los agentes IA');
+        }
+        if (cancelled) return;
+        setAgents(Array.isArray(data.agents) ? (data.agents as AgentSummary[]) : []);
+      } catch (error) {
+        if (cancelled) return;
+        setAgents([]);
+        setAgentsError(error instanceof Error ? error.message : 'No se pudieron cargar los agentes IA');
+      }
+    }
+
+    loadAgentsForReport();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeReportId, status]);
+
   if (status === 'loading') {
     if (authLoadingTimedOut) {
       return (
@@ -106,10 +157,23 @@ export default function Home() {
 
   return (
     <div className="app-shell">
-      <Header />
+      <Header
+        showAiLauncher={Boolean(activeReportId && agents.length > 0)}
+        aiAgentCount={agents.length}
+        onOpenAi={() => setAgentsOpen(true)}
+      />
       <Sidebar reports={reports} activeReportId={activeReportId} onSelectReport={setActiveReportId} />
 
       <main className="app-main" id="main-content">
+        {activeReportId && agentsOpen ? (
+          <AIAgentDrawer
+            open={agentsOpen}
+            reportId={activeReportId}
+            agents={agents}
+            onClose={() => setAgentsOpen(false)}
+          />
+        ) : null}
+
         {reportsError ? (
           <div className="state-container">
             <p className="state-title error-text">Error de acceso</p>
@@ -124,7 +188,14 @@ export default function Home() {
             </div>
           </div>
         ) : activeReportId ? (
-          <EmbeddedReport reportId={activeReportId} />
+          <>
+            {agentsError ? (
+              <div style={{ marginBottom: '0.75rem', color: 'var(--status-error)', fontSize: '0.875rem' }}>
+                {agentsError}
+              </div>
+            ) : null}
+            <EmbeddedReport reportId={activeReportId} />
+          </>
         ) : (
           <div className="state-container">
             <svg className="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">

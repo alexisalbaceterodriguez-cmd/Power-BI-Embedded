@@ -25,9 +25,20 @@ interface ReportRow {
   adminRlsUsername?: string;
 }
 
+interface AgentRow {
+  id: string;
+  name: string;
+  publishedUrl: string;
+  mcpUrl?: string;
+  mcpToolName?: string;
+  reportIds: string[];
+  isActive: boolean;
+}
+
 export default function AdminConsole() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [reports, setReports] = useState<ReportRow[]>([]);
+  const [agents, setAgents] = useState<AgentRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -51,6 +62,14 @@ export default function AdminConsole() {
     adminRlsUsername: '',
   });
 
+  const [agentForm, setAgentForm] = useState({
+    name: '',
+    publishedUrl: '',
+    mcpUrl: '',
+    mcpToolName: '',
+    reportIds: '',
+  });
+
   const reportIdSet = useMemo(() => new Set(reports.map((report) => report.id)), [reports]);
 
   async function loadData() {
@@ -64,6 +83,7 @@ export default function AdminConsole() {
       }
       setUsers(data.users ?? []);
       setReports(data.reports ?? []);
+      setAgents(data.agents ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error cargando panel');
     } finally {
@@ -150,6 +170,45 @@ export default function AdminConsole() {
     }
   }
 
+  async function createAgent() {
+    if (!agentForm.name || !agentForm.publishedUrl || !agentForm.reportIds) {
+      setError('Completa nombre, URL publicada y reportIds para el agente IA.');
+      return;
+    }
+
+    const requestedReportIds = agentForm.reportIds
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    const invalidReportId = requestedReportIds.find((reportId) => !reportIdSet.has(reportId));
+    if (invalidReportId) {
+      setError(`Report ID no valido para agente IA: ${invalidReportId}`);
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/admin/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(agentForm),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error ?? 'No se pudo crear el agente IA');
+      }
+
+      setAgentForm({ name: '', publishedUrl: '', mcpUrl: '', mcpToolName: '', reportIds: '' });
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error creando agente IA');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="state-container">
@@ -190,11 +249,24 @@ export default function AdminConsole() {
         </div>
         <button className="login-btn" disabled={busy} onClick={createReport}>Crear reporte</button>
 
+        <h2 style={{ fontSize: '1.05rem' }}>Alta de agente IA Fabric</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))', gap: '0.75rem' }}>
+          <input className="form-input" placeholder="name (ej: agent_sales_dataset)" value={agentForm.name} onChange={(e) => setAgentForm((prev) => ({ ...prev, name: e.target.value }))} />
+          <input className="form-input" placeholder="reportIds (csv)" value={agentForm.reportIds} onChange={(e) => setAgentForm((prev) => ({ ...prev, reportIds: e.target.value }))} />
+          <input className="form-input" placeholder="publishedUrl" value={agentForm.publishedUrl} onChange={(e) => setAgentForm((prev) => ({ ...prev, publishedUrl: e.target.value }))} />
+          <input className="form-input" placeholder="mcpUrl (opc.)" value={agentForm.mcpUrl} onChange={(e) => setAgentForm((prev) => ({ ...prev, mcpUrl: e.target.value }))} />
+          <input className="form-input" placeholder="mcpToolName (opc.)" value={agentForm.mcpToolName} onChange={(e) => setAgentForm((prev) => ({ ...prev, mcpToolName: e.target.value }))} />
+        </div>
+        <button className="login-btn" disabled={busy} onClick={createAgent}>Crear agente IA</button>
+
         <h2 style={{ fontSize: '1.05rem' }}>Usuarios ({users.length})</h2>
         <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.8rem' }}>{JSON.stringify(users, null, 2)}</pre>
 
         <h2 style={{ fontSize: '1.05rem' }}>Reportes ({reports.length})</h2>
         <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.8rem' }}>{JSON.stringify(reports, null, 2)}</pre>
+
+        <h2 style={{ fontSize: '1.05rem' }}>Agentes IA ({agents.length})</h2>
+        <pre style={{ whiteSpace: 'pre-wrap', fontSize: '0.8rem' }}>{JSON.stringify(agents, null, 2)}</pre>
       </section>
     </main>
   );

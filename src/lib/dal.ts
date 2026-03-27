@@ -29,6 +29,15 @@ interface DbReport {
   is_active: number;
 }
 
+interface DbAIAgent {
+  id: string;
+  name: string;
+  published_url: string;
+  mcp_url: string | null;
+  mcp_tool_name: string | null;
+  is_active: number;
+}
+
 export interface SessionAuthUser {
   id: string;
   name: string;
@@ -41,6 +50,8 @@ export interface SessionAuthUser {
 export interface PublicReport {
   id: string;
   displayName: string;
+  hasAiAgents?: boolean;
+  aiAgentCount?: number;
 }
 
 export interface SecureReportConfig {
@@ -79,6 +90,25 @@ export interface CreateReportInput {
   rlsRoles?: string[];
   adminRlsRoles?: string[];
   adminRlsUsername?: string;
+  isActive?: boolean;
+}
+
+export interface AIAgentConfig {
+  id: string;
+  name: string;
+  publishedUrl: string;
+  mcpUrl?: string;
+  mcpToolName?: string;
+  reportIds: string[];
+  isActive: boolean;
+}
+
+export interface CreateAIAgentInput {
+  name: string;
+  publishedUrl: string;
+  mcpUrl?: string;
+  mcpToolName?: string;
+  reportIds: string[];
   isActive?: boolean;
 }
 
@@ -197,6 +227,26 @@ function migrate(currentDb: BetterDb): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS ai_agents (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      published_url TEXT NOT NULL,
+      mcp_url TEXT,
+      mcp_tool_name TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_agent_reports (
+      agent_id TEXT NOT NULL,
+      report_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (agent_id, report_id),
+      FOREIGN KEY (agent_id) REFERENCES ai_agents(id) ON DELETE CASCADE,
+      FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS auth_attempts (
       attempt_key TEXT PRIMARY KEY,
       fail_count INTEGER NOT NULL,
@@ -213,6 +263,12 @@ function migrate(currentDb: BetterDb): void {
       created_at TEXT NOT NULL
     );
   `);
+
+  const aiAgentColumns = currentDb.prepare(`PRAGMA table_info(ai_agents)`).all() as Array<{ name: string }>;
+  const hasMcpToolName = aiAgentColumns.some((column) => column.name === 'mcp_tool_name');
+  if (!hasMcpToolName) {
+    currentDb.exec(`ALTER TABLE ai_agents ADD COLUMN mcp_tool_name TEXT;`);
+  }
 }
 
 function getBootstrapReports(): CreateReportInput[] {
@@ -247,6 +303,18 @@ function getBootstrapUsers(): BootstrapUserInput[] {
   if (!fromEnv) return [];
   try {
     const parsed = JSON.parse(fromEnv) as BootstrapUserInput[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+function getBootstrapAIAgents(): CreateAIAgentInput[] {
+  const fromEnv = process.env.BOOTSTRAP_AI_AGENTS_JSON;
+  if (!fromEnv) return [];
+  try {
+    const parsed = JSON.parse(fromEnv) as CreateAIAgentInput[];
     if (!Array.isArray(parsed)) return [];
     return parsed;
   } catch {
@@ -358,6 +426,39 @@ async function seedBootstrapData(currentDb: BetterDb): Promise<void> {
     for (const roleName of user.rlsRoles ?? []) {
       if (!roleName.trim()) continue;
       insertRls.run(userId, roleName.trim(), nowIso());
+    }
+  }
+
+  const aiAgentCount = (currentDb.prepare('SELECT COUNT(*) as count FROM ai_agents').get() as { count: number }).count;
+  if (aiAgentCount === 0) {
+    const agents = getBootstrapAIAgents();
+    if (agents.length > 0) {
+      const insertAgent = currentDb.prepare(`
+        INSERT INTO ai_agents (id, name, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const insertAgentReport = currentDb.prepare(`
+        INSERT OR IGNORE INTO ai_agent_reports (agent_id, report_id, created_at)
+        VALUES (?, ?, ?)
+      `);
+
+      for (const agent of agents) {
+        const agentId = randomUUID();
+        insertAgent.run(
+          agentId,
+          agent.name,
+          agent.publishedUrl,
+          agent.mcpUrl ?? null,
+          agent.mcpToolName ?? null,
+          agent.isActive === false ? 0 : 1,
+          nowIso(),
+          nowIso()
+        );
+
+        for (const reportId of agent.reportIds) {
+          insertAgentReport.run(agentId, reportId, nowIso());
+        }
+      }
     }
   }
 }
@@ -554,20 +655,37 @@ export async function getAccessibleReportsForUser(userId: string, role: UserRole
 
   const rows = role === 'admin'
     ? (getDb().prepare(`
-        SELECT id, display_name
-        FROM reports
-        WHERE is_active = 1
-        ORDER BY display_name ASC
-      `).all() as { id: string; display_name: string }[])
+        SELECT
+          r.id,
+          r.display_name,
+          COUNT(a.id) AS ai_agent_count
+        FROM reports r
+        LEFT JOIN ai_agent_reports ar ON ar.report_id = r.id
+        LEFT JOIN ai_agents a ON a.id = ar.agent_id AND a.is_active = 1
+        WHERE r.is_active = 1
+        GROUP BY r.id, r.display_name
+        ORDER BY r.display_name ASC
+      `).all() as { id: string; display_name: string; ai_agent_count: number }[])
     : (getDb().prepare(`
-        SELECT r.id, r.display_name
+        SELECT
+          r.id,
+          r.display_name,
+          COUNT(a.id) AS ai_agent_count
         FROM reports r
         INNER JOIN user_report_access ura ON ura.report_id = r.id
+        LEFT JOIN ai_agent_reports ar ON ar.report_id = r.id
+        LEFT JOIN ai_agents a ON a.id = ar.agent_id AND a.is_active = 1
         WHERE ura.user_id = ? AND r.is_active = 1
+        GROUP BY r.id, r.display_name
         ORDER BY r.display_name ASC
-      `).all(userId) as { id: string; display_name: string }[]);
+      `).all(userId) as { id: string; display_name: string; ai_agent_count: number }[]);
 
-  return rows.map((row) => ({ id: row.id, displayName: row.display_name }));
+  return rows.map((row) => ({
+    id: row.id,
+    displayName: row.display_name,
+    hasAiAgents: Number(row.ai_agent_count) > 0,
+    aiAgentCount: Number(row.ai_agent_count),
+  }));
 }
 
 export async function getSecureReportConfigForUser(params: {
@@ -710,6 +828,151 @@ export async function createReportFromAdmin(input: CreateReportInput): Promise<v
     nowIso(),
     nowIso()
   );
+}
+
+export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
+  await ensureDataLayer();
+  const rows = getDb().prepare(`
+    SELECT id, name, published_url, mcp_url, mcp_tool_name, is_active
+    FROM ai_agents
+    ORDER BY name ASC
+  `).all() as DbAIAgent[];
+
+  const reportRows = getDb().prepare(`
+    SELECT agent_id, report_id
+    FROM ai_agent_reports
+  `).all() as Array<{ agent_id: string; report_id: string }>;
+
+  const reportMap = new Map<string, string[]>();
+  for (const row of reportRows) {
+    const current = reportMap.get(row.agent_id) ?? [];
+    current.push(row.report_id);
+    reportMap.set(row.agent_id, current);
+  }
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    publishedUrl: row.published_url,
+    mcpUrl: row.mcp_url ?? undefined,
+    mcpToolName: row.mcp_tool_name ?? undefined,
+    reportIds: reportMap.get(row.id) ?? [],
+    isActive: row.is_active === 1,
+  }));
+}
+
+export async function createAIAgentFromAdmin(input: CreateAIAgentInput): Promise<void> {
+  await ensureDataLayer();
+  if (!input.name.trim()) throw new Error('Agent name is required.');
+  if (!input.publishedUrl.trim()) throw new Error('Published URL is required.');
+  if (input.reportIds.length === 0) throw new Error('At least one report must be associated.');
+
+  const agentId = randomUUID();
+
+  getDb().prepare(`
+    INSERT INTO ai_agents (id, name, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    agentId,
+    input.name.trim(),
+    input.publishedUrl.trim(),
+    input.mcpUrl?.trim() || null,
+    input.mcpToolName?.trim() || null,
+    input.isActive === false ? 0 : 1,
+    nowIso(),
+    nowIso()
+  );
+
+  const insertLink = getDb().prepare(`
+    INSERT OR IGNORE INTO ai_agent_reports (agent_id, report_id, created_at)
+    VALUES (?, ?, ?)
+  `);
+  for (const reportId of input.reportIds) {
+    insertLink.run(agentId, reportId, nowIso());
+  }
+}
+
+export async function getAIAgentsForReport(params: {
+  userId: string;
+  role: UserRole;
+  reportId: string;
+}): Promise<AIAgentConfig[]> {
+  await ensureDataLayer();
+
+  if (params.role !== 'admin') {
+    const access = getDb().prepare(`
+      SELECT 1 FROM user_report_access WHERE user_id = ? AND report_id = ?
+    `).get(params.userId, params.reportId);
+    if (!access) return [];
+  }
+
+  const rows = getDb().prepare(`
+    SELECT a.id, a.name, a.published_url, a.mcp_url, a.mcp_tool_name, a.is_active
+    FROM ai_agents a
+    INNER JOIN ai_agent_reports ar ON ar.agent_id = a.id
+    WHERE ar.report_id = ? AND a.is_active = 1
+    ORDER BY a.name ASC
+  `).all(params.reportId) as DbAIAgent[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    publishedUrl: row.published_url,
+    mcpUrl: row.mcp_url ?? undefined,
+    mcpToolName: row.mcp_tool_name ?? undefined,
+    reportIds: [params.reportId],
+    isActive: row.is_active === 1,
+  }));
+}
+
+export async function getAIAgentByIdForUser(params: {
+  userId: string;
+  role: UserRole;
+  agentId: string;
+  reportId?: string;
+}): Promise<AIAgentConfig | null> {
+  await ensureDataLayer();
+
+  const agent = getDb().prepare(`
+    SELECT id, name, published_url, mcp_url, mcp_tool_name, is_active
+    FROM ai_agents
+    WHERE id = ? AND is_active = 1
+  `).get(params.agentId) as DbAIAgent | undefined;
+  if (!agent) return null;
+
+  const linkedReports = getDb().prepare(`
+    SELECT report_id
+    FROM ai_agent_reports
+    WHERE agent_id = ?
+  `).all(params.agentId) as Array<{ report_id: string }>;
+
+  const reportIds = linkedReports.map((row) => row.report_id);
+  if (reportIds.length === 0) return null;
+
+  if (params.reportId && !reportIds.includes(params.reportId)) return null;
+
+  if (params.role !== 'admin') {
+    const placeholders = reportIds.map(() => '?').join(',');
+    const allowedRows = getDb().prepare(`
+      SELECT report_id
+      FROM user_report_access
+      WHERE user_id = ? AND report_id IN (${placeholders})
+    `).all(params.userId, ...reportIds) as Array<{ report_id: string }>;
+
+    const allowedReportSet = new Set(allowedRows.map((row) => row.report_id));
+    const hasAccess = params.reportId ? allowedReportSet.has(params.reportId) : allowedReportSet.size > 0;
+    if (!hasAccess) return null;
+  }
+
+  return {
+    id: agent.id,
+    name: agent.name,
+    publishedUrl: agent.published_url,
+    mcpUrl: agent.mcp_url ?? undefined,
+    mcpToolName: agent.mcp_tool_name ?? undefined,
+    reportIds,
+    isActive: agent.is_active === 1,
+  };
 }
 
 export async function recordAuditEvent(params: {

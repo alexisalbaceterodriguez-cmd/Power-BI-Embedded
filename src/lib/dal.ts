@@ -1,10 +1,10 @@
 import 'server-only';
 
-import bcrypt from 'bcryptjs';
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import * as azureRuntime from '@/lib/dalAzureRuntime';
 
 export type UserRole = 'admin' | 'client';
 
@@ -64,18 +64,10 @@ export interface SecureReportConfig {
   adminRlsUsername?: string;
 }
 
-export interface LocalAuthResult {
-  status: 'ok' | 'invalid_credentials' | 'disabled' | 'locked';
-  user?: SessionAuthUser;
-  retryAfterSeconds?: number;
-}
-
 export interface CreateUserInput {
   username: string;
-  email?: string;
+  email: string;
   role: UserRole;
-  password?: string;
-  passwordHash?: string;
   reportIds: string[];
   rlsRoles?: string[];
   isActive?: boolean;
@@ -117,8 +109,6 @@ interface BootstrapUserInput {
   username: string;
   email?: string;
   role: UserRole;
-  password?: string;
-  passwordHash?: string;
   reportIds?: string[];
   rlsRoles?: string[];
   isActive?: boolean;
@@ -129,6 +119,10 @@ type BetterDb = Database.Database;
 
 let db: BetterDb | null = null;
 let initialized = false;
+
+function isAzureSqlBackend(): boolean {
+  return Boolean(process.env.AZURE_SQL_SERVER?.trim() && process.env.AZURE_SQL_DATABASE?.trim());
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -157,15 +151,6 @@ function normalizeUsername(username: string): string {
 function isFutureDate(value?: string | null): boolean {
   if (!value) return false;
   return new Date(value).getTime() > Date.now();
-}
-
-function isStrongPassword(password: string): boolean {
-  if (password.length < 12) return false;
-  if (!/[a-z]/.test(password)) return false;
-  if (!/[A-Z]/.test(password)) return false;
-  if (!/[0-9]/.test(password)) return false;
-  if (!/[^a-zA-Z0-9]/.test(password)) return false;
-  return true;
 }
 
 function getDbPath(): string {
@@ -322,15 +307,6 @@ function getBootstrapAIAgents(): CreateAIAgentInput[] {
   }
 }
 
-async function hashPasswordIfNeeded(input: { password?: string; passwordHash?: string }): Promise<string | null> {
-  if (input.passwordHash) return input.passwordHash;
-  if (!input.password) return null;
-  if (!isStrongPassword(input.password)) {
-    throw new Error('Password policy violation: minimum 12 chars with upper/lower/number/symbol.');
-  }
-  return bcrypt.hash(input.password, 12);
-}
-
 async function seedBootstrapData(currentDb: BetterDb): Promise<void> {
   const reportCount = (currentDb.prepare('SELECT COUNT(*) as count FROM reports').get() as { count: number }).count;
   if (reportCount === 0) {
@@ -361,27 +337,18 @@ async function seedBootstrapData(currentDb: BetterDb): Promise<void> {
   const userCount = (currentDb.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count;
   if (userCount > 0) return;
 
-  const adminUsername = process.env.BOOTSTRAP_ADMIN_USERNAME;
-  const adminPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD;
-  const adminPasswordHash = process.env.BOOTSTRAP_ADMIN_PASSWORD_HASH;
+  const adminUsername = process.env.BOOTSTRAP_ADMIN_USERNAME ?? 'admin';
   const adminEmail = normalizeEmail(process.env.BOOTSTRAP_ADMIN_EMAIL);
 
-  if (!adminUsername || (!adminPassword && !adminPasswordHash)) {
+  if (!adminEmail) {
     return;
   }
-
-  const passwordHash = await hashPasswordIfNeeded({
-    password: adminPassword,
-    passwordHash: adminPasswordHash,
-  });
-
-  if (!passwordHash) return;
 
   const adminId = randomUUID();
   currentDb.prepare(`
     INSERT INTO users (id, username, email, password_hash, role, is_active, expires_at, created_at, updated_at)
     VALUES (?, ?, ?, ?, 'admin', 1, NULL, ?, ?)
-  `).run(adminId, normalizeUsername(adminUsername), adminEmail ?? null, passwordHash, nowIso(), nowIso());
+  `).run(adminId, normalizeUsername(adminUsername), adminEmail, null, nowIso(), nowIso());
 
   const reportIds = currentDb.prepare('SELECT id FROM reports WHERE is_active = 1').all() as { id: string }[];
   const insertAccess = currentDb.prepare('INSERT INTO user_report_access (user_id, report_id, created_at) VALUES (?, ?, ?)');
@@ -391,15 +358,13 @@ async function seedBootstrapData(currentDb: BetterDb): Promise<void> {
 
   const bootstrapUsers = getBootstrapUsers();
   for (const user of bootstrapUsers) {
+    const normalizedEmail = normalizeEmail(user.email);
+    if (!normalizedEmail) continue;
+
     const normalizedUsername = normalizeUsername(user.username);
     if (!normalizedUsername || normalizedUsername.toLowerCase() === normalizeUsername(adminUsername).toLowerCase()) {
       continue;
     }
-
-    const userPasswordHash = await hashPasswordIfNeeded({
-      password: user.password,
-      passwordHash: user.passwordHash,
-    });
 
     const userId = user.id ?? randomUUID();
     currentDb.prepare(`
@@ -408,8 +373,8 @@ async function seedBootstrapData(currentDb: BetterDb): Promise<void> {
     `).run(
       userId,
       normalizedUsername,
-      normalizeEmail(user.email) ?? null,
-      userPasswordHash,
+      normalizedEmail,
+      null,
       user.role,
       user.isActive === false ? 0 : 1,
       user.expiresAt ?? null,
@@ -464,6 +429,11 @@ async function seedBootstrapData(currentDb: BetterDb): Promise<void> {
 }
 
 export async function ensureDataLayer(): Promise<void> {
+  if (isAzureSqlBackend()) {
+    await azureRuntime.ensureDataLayer();
+    return;
+  }
+
   if (initialized) return;
   const currentDb = getDb();
   migrate(currentDb);
@@ -502,109 +472,11 @@ function toSessionUser(user: DbUser): SessionAuthUser {
   };
 }
 
-function getAttemptKey(ip: string | undefined, username: string): string {
-  return `${ip ?? 'unknown'}|${username.toLowerCase()}`;
-}
-
-function getAttemptPolicy() {
-  return {
-    maxAttempts: Number(process.env.AUTH_MAX_ATTEMPTS ?? 5),
-    maxLockMinutes: Number(process.env.AUTH_MAX_LOCK_MINUTES ?? 60),
-  };
-}
-
-function getThrottleStatus(attemptKey: string): { allowed: boolean; retryAfterSeconds?: number; failCount: number } {
-  const row = getDb().prepare('SELECT fail_count, lock_until FROM auth_attempts WHERE attempt_key = ?').get(attemptKey) as
-    | { fail_count: number; lock_until: string | null }
-    | undefined;
-
-  if (!row) return { allowed: true, failCount: 0 };
-
-  if (row.lock_until) {
-    const lockUntilMs = new Date(row.lock_until).getTime();
-    if (lockUntilMs > Date.now()) {
-      const retryAfterSeconds = Math.max(1, Math.ceil((lockUntilMs - Date.now()) / 1000));
-      return { allowed: false, retryAfterSeconds, failCount: row.fail_count };
-    }
-  }
-
-  return { allowed: true, failCount: row.fail_count };
-}
-
-function registerFailedAttempt(attemptKey: string): void {
-  const policy = getAttemptPolicy();
-  const current = getDb().prepare('SELECT fail_count FROM auth_attempts WHERE attempt_key = ?').get(attemptKey) as
-    | { fail_count: number }
-    | undefined;
-
-  const failCount = (current?.fail_count ?? 0) + 1;
-  let lockUntil: string | null = null;
-
-  if (failCount >= policy.maxAttempts) {
-    const exponent = failCount - policy.maxAttempts;
-    const lockMinutes = Math.min(2 ** exponent, policy.maxLockMinutes);
-    lockUntil = new Date(Date.now() + lockMinutes * 60 * 1000).toISOString();
-  }
-
-  getDb().prepare(`
-    INSERT INTO auth_attempts (attempt_key, fail_count, lock_until, updated_at)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(attempt_key) DO UPDATE SET
-      fail_count = excluded.fail_count,
-      lock_until = excluded.lock_until,
-      updated_at = excluded.updated_at
-  `).run(attemptKey, failCount, lockUntil, nowIso());
-}
-
-function clearFailedAttempts(attemptKey: string): void {
-  getDb().prepare('DELETE FROM auth_attempts WHERE attempt_key = ?').run(attemptKey);
-}
-
-export async function authenticateLocalUser(params: {
-  username: string;
-  password: string;
-  ip?: string;
-}): Promise<LocalAuthResult> {
-  await ensureDataLayer();
-
-  const localEnabled = process.env.AUTH_ENABLE_LOCAL_FALLBACK !== 'false';
-  if (!localEnabled) {
-    return { status: 'disabled' };
-  }
-
-  const username = normalizeUsername(params.username);
-  if (!username || !params.password) {
-    return { status: 'invalid_credentials' };
-  }
-
-  const attemptKey = getAttemptKey(params.ip, username);
-  const throttle = getThrottleStatus(attemptKey);
-  if (!throttle.allowed) {
-    return { status: 'locked', retryAfterSeconds: throttle.retryAfterSeconds };
-  }
-
-  const user = getDb().prepare(`
-    SELECT id, username, email, password_hash, role, is_active, expires_at
-    FROM users
-    WHERE LOWER(username) = LOWER(?)
-  `).get(username) as DbUser | undefined;
-
-  if (!user || !user.password_hash || !userIsActive(user)) {
-    registerFailedAttempt(attemptKey);
-    return { status: 'invalid_credentials' };
-  }
-
-  const valid = await bcrypt.compare(params.password, user.password_hash);
-  if (!valid) {
-    registerFailedAttempt(attemptKey);
-    return { status: 'invalid_credentials' };
-  }
-
-  clearFailedAttempts(attemptKey);
-  return { status: 'ok', user: toSessionUser(user) };
-}
-
 export async function findUserByEmailForMicrosoft(email: string): Promise<SessionAuthUser | null> {
+  if (isAzureSqlBackend()) {
+    return azureRuntime.findUserByEmailForMicrosoft(email);
+  }
+
   await ensureDataLayer();
   const normalized = normalizeEmail(email);
   if (!normalized) return null;
@@ -620,6 +492,10 @@ export async function findUserByEmailForMicrosoft(email: string): Promise<Sessio
 }
 
 export async function findUserByMicrosoftClaims(claimCandidates: string[]): Promise<SessionAuthUser | null> {
+  if (isAzureSqlBackend()) {
+    return azureRuntime.findUserByMicrosoftClaims(claimCandidates);
+  }
+
   await ensureDataLayer();
 
   const normalizedCandidates = Array.from(
@@ -639,6 +515,10 @@ export async function findUserByMicrosoftClaims(claimCandidates: string[]): Prom
 }
 
 export async function getSessionUserById(userId: string): Promise<SessionAuthUser | null> {
+  if (isAzureSqlBackend()) {
+    return azureRuntime.getSessionUserById(userId);
+  }
+
   await ensureDataLayer();
   const user = getDb().prepare(`
     SELECT id, username, email, password_hash, role, is_active, expires_at
@@ -651,6 +531,10 @@ export async function getSessionUserById(userId: string): Promise<SessionAuthUse
 }
 
 export async function getAccessibleReportsForUser(userId: string, role: UserRole): Promise<PublicReport[]> {
+  if (isAzureSqlBackend()) {
+    return azureRuntime.getAccessibleReportsForUser(userId, role);
+  }
+
   await ensureDataLayer();
 
   const rows = role === 'admin'
@@ -693,6 +577,10 @@ export async function getSecureReportConfigForUser(params: {
   role: UserRole;
   requestedReportId: string;
 }): Promise<SecureReportConfig | null> {
+  if (isAzureSqlBackend()) {
+    return azureRuntime.getSecureReportConfigForUser(params);
+  }
+
   await ensureDataLayer();
 
   const report = getDb().prepare(`
@@ -729,6 +617,10 @@ export async function listUsersForAdmin(): Promise<Array<{
   reportIds: string[];
   rlsRoles: string[];
 }>> {
+  if (isAzureSqlBackend()) {
+    return azureRuntime.listUsersForAdmin();
+  }
+
   await ensureDataLayer();
   const rows = getDb().prepare(`
     SELECT id, username, email, role, is_active, expires_at
@@ -749,6 +641,10 @@ export async function listUsersForAdmin(): Promise<Array<{
 }
 
 export async function listReportsForAdmin(): Promise<SecureReportConfig[]> {
+  if (isAzureSqlBackend()) {
+    return azureRuntime.listReportsForAdmin();
+  }
+
   await ensureDataLayer();
   const rows = getDb().prepare(`
     SELECT id, display_name, workspace_id, report_id, rls_roles_json, admin_rls_roles_json, admin_rls_username, is_active
@@ -770,15 +666,17 @@ export async function listReportsForAdmin(): Promise<SecureReportConfig[]> {
 }
 
 export async function createUserFromAdmin(input: CreateUserInput): Promise<void> {
+  if (isAzureSqlBackend()) {
+    await azureRuntime.createUserFromAdmin(input);
+    return;
+  }
+
   await ensureDataLayer();
 
   const username = normalizeUsername(input.username);
   if (!username) throw new Error('Username is required.');
-
-  const passwordHash = await hashPasswordIfNeeded({
-    password: input.password,
-    passwordHash: input.passwordHash,
-  });
+  const email = normalizeEmail(input.email);
+  if (!email) throw new Error('Email is required for Microsoft authentication mapping.');
 
   const userId = randomUUID();
   getDb().prepare(`
@@ -787,8 +685,8 @@ export async function createUserFromAdmin(input: CreateUserInput): Promise<void>
   `).run(
     userId,
     username,
-    normalizeEmail(input.email) ?? null,
-    passwordHash,
+    email,
+    null,
     input.role,
     input.isActive === false ? 0 : 1,
     input.expiresAt ?? null,
@@ -809,6 +707,11 @@ export async function createUserFromAdmin(input: CreateUserInput): Promise<void>
 }
 
 export async function createReportFromAdmin(input: CreateReportInput): Promise<void> {
+  if (isAzureSqlBackend()) {
+    await azureRuntime.createReportFromAdmin(input);
+    return;
+  }
+
   await ensureDataLayer();
   getDb().prepare(`
     INSERT INTO reports (
@@ -831,6 +734,10 @@ export async function createReportFromAdmin(input: CreateReportInput): Promise<v
 }
 
 export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
+  if (isAzureSqlBackend()) {
+    return azureRuntime.listAIAgentsForAdmin();
+  }
+
   await ensureDataLayer();
   const rows = getDb().prepare(`
     SELECT id, name, published_url, mcp_url, mcp_tool_name, is_active
@@ -862,6 +769,11 @@ export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
 }
 
 export async function createAIAgentFromAdmin(input: CreateAIAgentInput): Promise<void> {
+  if (isAzureSqlBackend()) {
+    await azureRuntime.createAIAgentFromAdmin(input);
+    return;
+  }
+
   await ensureDataLayer();
   if (!input.name.trim()) throw new Error('Agent name is required.');
   if (!input.publishedUrl.trim()) throw new Error('Published URL is required.');
@@ -897,6 +809,10 @@ export async function getAIAgentsForReport(params: {
   role: UserRole;
   reportId: string;
 }): Promise<AIAgentConfig[]> {
+  if (isAzureSqlBackend()) {
+    return azureRuntime.getAIAgentsForReport(params);
+  }
+
   await ensureDataLayer();
 
   if (params.role !== 'admin') {
@@ -931,6 +847,10 @@ export async function getAIAgentByIdForUser(params: {
   agentId: string;
   reportId?: string;
 }): Promise<AIAgentConfig | null> {
+  if (isAzureSqlBackend()) {
+    return azureRuntime.getAIAgentByIdForUser(params);
+  }
+
   await ensureDataLayer();
 
   const agent = getDb().prepare(`
@@ -981,6 +901,11 @@ export async function recordAuditEvent(params: {
   ip?: string;
   detail?: Record<string, unknown>;
 }): Promise<void> {
+  if (isAzureSqlBackend()) {
+    await azureRuntime.recordAuditEvent(params);
+    return;
+  }
+
   await ensureDataLayer();
   getDb().prepare(`
     INSERT INTO audit_log (event_type, user_id, ip, detail_json, created_at)

@@ -10,14 +10,11 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const urlError = searchParams.get('error');
 
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(
     urlError === 'AccessDenied' 
       ? 'Acceso denegado. Tu cuenta no está autorizada para acceder a esta plataforma.' 
       : null
   );
-  const [loading, setLoading] = useState(false);
   const [microsoftLoading, setMicrosoftLoading] = useState(false);
 
   async function handleMicrosoftLogin() {
@@ -28,27 +25,6 @@ function LoginContent() {
       { callbackUrl: '/' },
       { prompt: 'select_account' }
     );
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-
-    const result = await signIn('credentials', {
-      username,
-      password,
-      redirect: false,
-    });
-
-    setLoading(false);
-
-    if (result?.error) {
-      setError('Credenciales incorrectas. Por favor, verifica tu usuario o contraseña.');
-    } else {
-      router.push('/');
-      router.refresh();
-    }
   }
 
   return (
@@ -84,7 +60,7 @@ function LoginContent() {
               type="button"
               className="login-btn"
               onClick={handleMicrosoftLogin}
-              disabled={microsoftLoading || loading}
+              disabled={microsoftLoading}
               style={{ marginTop: 0 }}
             >
               Probar con otra cuenta
@@ -107,7 +83,7 @@ function LoginContent() {
             border: '1px solid #333'
           }}
           onClick={handleMicrosoftLogin}
-          disabled={microsoftLoading || loading}
+          disabled={microsoftLoading}
         >
           {microsoftLoading ? (
             <span className="btn-spinner" aria-label="Redirigiendo..." />
@@ -118,57 +94,6 @@ function LoginContent() {
              </>
           )}
         </button>
-
-        <div style={{ display: 'flex', alignItems: 'center', textAlign: 'center', margin: '1rem 0', color: '#666', fontSize: '0.875rem' }}>
-          <div style={{ flex: 1, borderBottom: '1px solid #eaeaea' }}></div>
-          <span style={{ padding: '0 10px' }}>O con credenciales locales</span>
-          <div style={{ flex: 1, borderBottom: '1px solid #eaeaea' }}></div>
-        </div>
-
-        <form onSubmit={handleSubmit} className="login-form" noValidate>
-          <div className="form-group">
-            <label htmlFor="username" className="form-label">Usuario</label>
-            <input
-              id="username"
-              type="text"
-              className="form-input"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="ej: nombre.apellido"
-              autoComplete="username"
-              required
-              disabled={loading || microsoftLoading}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="password" className="form-label">Contraseña</label>
-            <input
-              id="password"
-              type="password"
-              className="form-input"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              autoComplete="current-password"
-              required
-              disabled={loading || microsoftLoading}
-            />
-          </div>
-
-          <button
-            type="submit"
-            className="login-btn"
-            disabled={loading || microsoftLoading}
-            id="login-submit"
-          >
-            {loading ? (
-              <span className="btn-spinner" aria-label="Validando credenciales..." />
-            ) : (
-              'Acceder al Portal'
-            )}
-          </button>
-        </form>
       </div>
     </div>
   );

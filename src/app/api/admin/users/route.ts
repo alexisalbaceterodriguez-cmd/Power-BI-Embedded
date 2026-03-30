@@ -23,7 +23,6 @@ export async function POST(request: NextRequest) {
       username?: string;
       email?: string;
       role?: 'admin' | 'client';
-      password?: string;
       reportIds?: string[] | string;
       rlsRoles?: string[] | string;
       isActive?: boolean;
@@ -32,9 +31,8 @@ export async function POST(request: NextRequest) {
 
     await createUserFromAdmin({
       username: payload.username?.trim() ?? '',
-      email: payload.email?.trim(),
+      email: payload.email?.trim() ?? '',
       role: payload.role ?? 'client',
-      password: payload.password,
       reportIds: Array.isArray(payload.reportIds) ? payload.reportIds : splitCsv(payload.reportIds),
       rlsRoles: Array.isArray(payload.rlsRoles) ? payload.rlsRoles : splitCsv(payload.rlsRoles),
       isActive: payload.isActive,

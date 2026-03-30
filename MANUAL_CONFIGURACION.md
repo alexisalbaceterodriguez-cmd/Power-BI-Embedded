@@ -25,19 +25,18 @@ Tablas principales de seguridad:
 - `reports`
 - `user_report_access`
 - `user_rls_roles`
-- `auth_attempts`
 - `audit_log`
 
 ---
 
 ## 2) Crear un usuario (metodo recomendado: panel /admin)
 
-En `/admin`, bloque **Alta de usuario local**:
+En `/admin`, bloque **Alta de usuario Microsoft**:
 
 1. `username`: nombre de usuario (ej. `cliente_finance`).
 2. `email`: correo del usuario (obligatorio si usara Microsoft Entra ID).
 3. `role`: `client` o `admin`.
-4. `password`: minimo 12 caracteres con mayuscula, minuscula, numero y simbolo.
+4. No se usa password local. El acceso se valida solo con Microsoft Entra ID.
 5. `reportIds (csv)`: IDs internos de informes, separados por coma.
    - Ejemplo: `finance-controlling,informe-webinar`
 6. `rlsRoles (csv)`: roles RLS permitidos para ese usuario.
@@ -46,8 +45,8 @@ En `/admin`, bloque **Alta de usuario local**:
 
 Comprobacion:
 1. Debe aparecer en el bloque **Usuarios**.
-2. El usuario ya puede iniciar sesion local.
-3. Si tiene `email`, tambien puede iniciar con Microsoft (si su cuenta Entra coincide).
+2. El usuario ya puede iniciar sesion con Microsoft Entra ID.
+3. El usuario puede iniciar sesion si el `email` coincide con sus claims de Entra ID.
 
 ---
 
@@ -196,15 +195,6 @@ Si un usuario Microsoft recibe `AccessDenied`:
 ### 9.3 Login Microsoft no deja cambiar cuenta
 - El sistema ya fuerza selector de cuenta (`prompt=select_account`).
 - Si persiste, cerrar sesion de Microsoft en el navegador y reintentar.
-
-### 9.4 Bloqueo por intentos fallidos
-- Se aplica lockout progresivo en login local.
-- Esperar ventana de bloqueo o reiniciar contador borrando fila en `auth_attempts`.
-
-```sql
-DELETE FROM auth_attempts
-WHERE attempt_key LIKE '%|NOMBRE_USUARIO';
-```
 
 ---
 

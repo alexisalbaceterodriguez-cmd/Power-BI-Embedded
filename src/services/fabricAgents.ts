@@ -30,13 +30,17 @@ async function safeText(response: Response): Promise<string | null> {
   }
 }
 
+function readAzureEnv(primary: string, legacy: string): string | undefined {
+  return process.env[primary]?.trim() || process.env[legacy]?.trim() || undefined;
+}
+
 export async function getFabricApiToken(): Promise<string> {
   const cached = cachedFabricToken();
   if (cached) return cached;
 
-  const tenantId = process.env.TENANT_ID;
-  const clientId = process.env.CLIENT_ID;
-  const clientSecret = process.env.CLIENT_SECRET;
+  const tenantId = readAzureEnv('AZURE_TENANT_ID', 'TENANT_ID');
+  const clientId = readAzureEnv('AZURE_CLIENT_ID', 'CLIENT_ID');
+  const clientSecret = readAzureEnv('AZURE_CLIENT_SECRET', 'CLIENT_SECRET');
   const scope = process.env.FABRIC_API_SCOPE ?? 'https://api.fabric.microsoft.com/.default';
 
   if (!tenantId || !clientId || !clientSecret) {

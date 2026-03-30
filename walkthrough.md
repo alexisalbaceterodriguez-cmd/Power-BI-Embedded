@@ -1,39 +1,43 @@
-# Power BI Embedded Integration Complete
+# Power BI Embedded Walkthrough
 
-## Changes Made
-- **Next.js Foundation**: Initialized a Next.js 15 App router footprint cleanly in the workspace.
-- **Security / Back-end**: Developed [src/services/powerbi.ts](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/services/powerbi.ts) implementing `@azure/msal-node` to acquire Active Directory tokens securely using the Client Credentials Flow (Service Principal).
-- **Entra ID Integration**: Added Native B2B / internal user Microsoft Entra ID authentication via NextAuth into [src/auth.ts](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/auth.ts). Login UI was updated in [src/app/login/page.tsx](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/app/login/page.tsx) with strict mapping constraints rejecting unlisted users.
-- **API Setup**: Configured a Next.js API route [src/app/api/get-embed-token/route.ts](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/app/api/get-embed-token/route.ts) that safely relays the Embed Tokens and URLs strictly to the frontend bypassing credential leak.
-- **Front-end Embed**: Built [src/components/PowerBIEmbed.tsx](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/components/PowerBIEmbed.tsx) using `powerbi-client-react` to dynamically mount the embedded report and handle loading and error states intuitively.
-- **Aesthetics**: Wrote a premium dark-themed vanilla CSS setup in [globals.css](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/src/app/globals.css) that provides a stunning framework.
-- **Codebase Cleanliness**: Swept empty SVGs, documented functions with thorough JSDoc standards, and created an enterprise-level [README.md](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/README.md).
+## Estado actual
 
-## What Was Tested
-- **Compilation Check**: Successfully compiled the React & Next.js codebase statically via `npm run build` checking type definitions correctly (including the new NextAuth config and login components).
-- SSR boundary was handled accurately using `next/dynamic`, avoiding generic window initialization errors frequently caused by `powerbi-client-react` during Server Components rendering.
+- Autenticacion Microsoft-only mediante NextAuth + Microsoft Entra ID.
+- Sin formulario de usuario/password local.
+- Mapeo de usuario por email/claims Entra ID contra `users.email`.
 
-## Validation Results
-The project compiled flawlessly exiting with zero errors.
+## Configuracion recomendada
 
-## Next Step: Run It!
+1. Definir variables canonicas Azure:
+   - `AZURE_TENANT_ID`
+   - `AZURE_CLIENT_ID`
+   - `AZURE_CLIENT_SECRET`
+2. Definir auth de aplicacion:
+   - `NEXTAUTH_SECRET`
+   - `NEXTAUTH_URL`
+3. Definir bootstrap inicial (opcional):
+   - `BOOTSTRAP_REPORTS_JSON`
+   - `BOOTSTRAP_ADMIN_EMAIL`
+   - `BOOTSTRAP_USERS_JSON`
 
-To complete the setup and interact with your Power BI Report:
+Compatibilidad temporal:
 
-1. **Populate [.env.local](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/.env.local)**: Copy [.env.local.example](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/.env.local.example) into [.env.local](file:///c:/Users/alexi/Desktop/Proyectos/Power%20BI%20Embedded/.env.local) and override the parameters.
-   - `TENANT_ID`: Your Azure AD Directory ID
-   - `CLIENT_ID`: The App Registration (Service Principal) Application ID
-   - `CLIENT_SECRET`: A generated secret for the App Registration
-   - `WORKSPACE_ID`: Target Power BI Workspace GUID
-   - `REPORT_ID`: Target Report GUID
-2. **Launch Server**: Execute `npm run dev` to boot the application.
-3. Access [localhost:3000](http://localhost:3000) to confirm your configuration!
+- `TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET` siguen funcionando como fallback.
 
-> [!WARNING]
-> Remember that the generated App Registration must be assigned with Admin or Member role privileges over the workspace storing the target Report, otherwise Power BI REST API overrides will fail.
+## Ejecucion local
 
-render_diffs(file:///C:/Users/alexi/Desktop/Proyectos/Power BI Embedded/src/services/powerbi.ts)
-render_diffs(file:///C:/Users/alexi/Desktop/Proyectos/Power BI Embedded/src/app/api/get-embed-token/route.ts)
-render_diffs(file:///C:/Users/alexi/Desktop/Proyectos/Power BI Embedded/src/components/PowerBIEmbed.tsx)
-render_diffs(file:///C:/Users/alexi/Desktop/Proyectos/Power BI Embedded/src/app/page.tsx)
-render_diffs(file:///C:/Users/alexi/Desktop/Proyectos/Power BI Embedded/src/app/globals.css)
+1. `npm install`
+2. `npm run dev`
+3. Abrir `http://localhost:3000/login` y usar inicio de sesion Microsoft.
+
+## Comprobaciones operativas
+
+1. Usuario sin email mapeado en BD -> `AccessDenied`.
+2. Usuario mapeado -> acceso a informes segun `user_report_access` y `user_rls_roles`.
+3. `/admin` crea usuarios Microsoft (sin password local).
+
+## Seguridad en Azure Web App
+
+1. Guardar secretos solo en Key Vault y usar references en App Settings.
+2. Habilitar Managed Identity en la Web App.
+3. Rotar credenciales historicas expuestas y no reutilizarlas.

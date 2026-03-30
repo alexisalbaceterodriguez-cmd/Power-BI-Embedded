@@ -2,14 +2,11 @@
  * auth.ts - Auth.js v5 hardened configuration.
  */
 import NextAuth from 'next-auth';
-import Credentials from 'next-auth/providers/credentials';
 import MicrosoftEntraId from 'next-auth/providers/microsoft-entra-id';
 import {
-  authenticateLocalUser,
   findUserByMicrosoftClaims,
   getSessionUserById,
   recordAuditEvent,
-  SessionAuthUser,
 } from '@/lib/dal';
 
 declare module 'next-auth' {
@@ -32,84 +29,26 @@ declare module 'next-auth' {
   }
 }
 
-function ipFromRequest(request: Request): string | undefined {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
-  }
-  return request.headers.get('x-real-ip') ?? undefined;
-}
-
-function toAuthUser(user: SessionAuthUser) {
-  return {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-    reportIds: user.reportIds,
-    rlsRoles: user.rlsRoles,
-  };
-}
-
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     MicrosoftEntraId({
-      clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID,
-      clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
-      issuer: process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER,
+      clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID ?? process.env.AZURE_CLIENT_ID ?? process.env.CLIENT_ID,
+      clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET ?? process.env.AZURE_CLIENT_SECRET ?? process.env.CLIENT_SECRET,
+      issuer:
+        process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER ??
+        (process.env.AZURE_TENANT_ID || process.env.TENANT_ID
+          ? `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID ?? process.env.TENANT_ID}/v2.0`
+          : undefined),
       authorization: {
         params: {
           prompt: 'select_account',
         },
       },
     }),
-    Credentials({
-      name: 'Credentials',
-      credentials: {
-        username: { label: 'Usuario', type: 'text' },
-        password: { label: 'Contrasena', type: 'password' },
-      },
-      async authorize(credentials, request) {
-        const username = String(credentials?.username ?? '');
-        const password = String(credentials?.password ?? '');
-        const ip = ipFromRequest(request);
-
-        const result = await authenticateLocalUser({
-          username,
-          password,
-          ip,
-        });
-
-        if (result.status !== 'ok' || !result.user) {
-          await recordAuditEvent({
-            eventType: 'auth.local.failed',
-            ip,
-            detail: {
-              username,
-              reason: result.status,
-              retryAfterSeconds: result.retryAfterSeconds,
-            },
-          });
-          return null;
-        }
-
-        await recordAuditEvent({
-          eventType: 'auth.local.success',
-          userId: result.user.id,
-          ip,
-          detail: { username: result.user.name },
-        });
-
-        return toAuthUser(result.user);
-      },
-    }),
   ],
   callbacks: {
     async signIn({ user, account, profile }) {
-      if (account?.provider !== 'microsoft-entra-id') {
-        return true;
-      }
+      if (account?.provider !== 'microsoft-entra-id') return false;
 
       const profileRecord = (profile ?? {}) as Record<string, unknown>;
       const claimCandidates = [

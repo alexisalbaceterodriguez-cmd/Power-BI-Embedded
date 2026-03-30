@@ -47,7 +47,6 @@ export default function AdminConsole() {
     username: '',
     email: '',
     role: 'client' as Role,
-    password: '',
     reportIds: '',
     rlsRoles: '',
   });
@@ -96,8 +95,8 @@ export default function AdminConsole() {
   }, []);
 
   async function createUser() {
-    if (!userForm.username || !userForm.password) {
-      setError('Usuario y password son obligatorios.');
+    if (!userForm.username || !userForm.email) {
+      setError('Usuario y email son obligatorios para Microsoft Entra ID.');
       return;
     }
 
@@ -125,7 +124,7 @@ export default function AdminConsole() {
         throw new Error(data.error ?? 'No se pudo crear el usuario');
       }
 
-      setUserForm({ username: '', email: '', role: 'client', password: '', reportIds: '', rlsRoles: '' });
+      setUserForm({ username: '', email: '', role: 'client', reportIds: '', rlsRoles: '' });
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error creando usuario');
@@ -223,15 +222,14 @@ export default function AdminConsole() {
         <h1 className="state-title" style={{ fontSize: '1.5rem' }}>Panel de administracion</h1>
         {error ? <p className="error-text">{error}</p> : null}
 
-        <h2 style={{ fontSize: '1.05rem' }}>Alta de usuario local</h2>
+        <h2 style={{ fontSize: '1.05rem' }}>Alta de usuario Microsoft</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))', gap: '0.75rem' }}>
           <input className="form-input" placeholder="username" value={userForm.username} onChange={(e) => setUserForm((prev) => ({ ...prev, username: e.target.value }))} />
-          <input className="form-input" placeholder="email" value={userForm.email} onChange={(e) => setUserForm((prev) => ({ ...prev, email: e.target.value }))} />
+          <input className="form-input" placeholder="email (debe coincidir con Entra ID)" value={userForm.email} onChange={(e) => setUserForm((prev) => ({ ...prev, email: e.target.value }))} />
           <select className="form-input" value={userForm.role} onChange={(e) => setUserForm((prev) => ({ ...prev, role: e.target.value as Role }))}>
             <option value="client">client</option>
             <option value="admin">admin</option>
           </select>
-          <input className="form-input" type="password" placeholder="password (min 12 + complejidad)" value={userForm.password} onChange={(e) => setUserForm((prev) => ({ ...prev, password: e.target.value }))} />
           <input className="form-input" placeholder="reportIds (csv)" value={userForm.reportIds} onChange={(e) => setUserForm((prev) => ({ ...prev, reportIds: e.target.value }))} />
           <input className="form-input" placeholder="rlsRoles (csv)" value={userForm.rlsRoles} onChange={(e) => setUserForm((prev) => ({ ...prev, rlsRoles: e.target.value }))} />
         </div>

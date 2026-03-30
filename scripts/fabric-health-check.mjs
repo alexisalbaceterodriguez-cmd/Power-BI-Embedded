@@ -1,9 +1,10 @@
-/* eslint-disable no-console */
-const REQUIRED_ENV = ['TENANT_ID', 'CLIENT_ID', 'CLIENT_SECRET'];
-
 function getEnv(name, fallback = '') {
   const value = process.env[name];
   return typeof value === 'string' ? value.trim() : fallback;
+}
+
+function getAzureEnv(primary, legacy) {
+  return getEnv(primary) || getEnv(legacy);
 }
 
 function getBootstrapAgent() {
@@ -52,9 +53,9 @@ function line(title, value = '') {
 }
 
 async function acquireToken() {
-  const tenantId = getEnv('TENANT_ID');
-  const clientId = getEnv('CLIENT_ID');
-  const clientSecret = getEnv('CLIENT_SECRET');
+  const tenantId = getAzureEnv('AZURE_TENANT_ID', 'TENANT_ID');
+  const clientId = getAzureEnv('AZURE_CLIENT_ID', 'CLIENT_ID');
+  const clientSecret = getAzureEnv('AZURE_CLIENT_SECRET', 'CLIENT_SECRET');
   const scope = getEnv('FABRIC_API_SCOPE', 'https://api.fabric.microsoft.com/.default');
 
   const body = new URLSearchParams({
@@ -215,9 +216,14 @@ async function checkMcp(token, mcpUrl, toolName, question) {
 }
 
 async function main() {
-  const missing = REQUIRED_ENV.filter((name) => !getEnv(name));
+  const missing = [
+    ['AZURE_TENANT_ID', 'TENANT_ID'],
+    ['AZURE_CLIENT_ID', 'CLIENT_ID'],
+    ['AZURE_CLIENT_SECRET', 'CLIENT_SECRET'],
+  ].filter(([primary, legacy]) => !getAzureEnv(primary, legacy));
+
   if (missing.length > 0) {
-    throw new Error(`Faltan variables obligatorias: ${missing.join(', ')}`);
+    throw new Error(`Faltan variables obligatorias: ${missing.map(([primary, legacy]) => `${primary} (o ${legacy})`).join(', ')}`);
   }
 
   const bootstrapAgent = getBootstrapAgent();

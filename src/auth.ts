@@ -71,6 +71,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       user.id = mappedUser.id;
+      user.name = mappedUser.name ?? user.name;
+      user.email = mappedUser.email ?? user.email;
       user.role = mappedUser.role;
       user.reportIds = mappedUser.reportIds;
       user.rlsRoles = mappedUser.rlsRoles;
@@ -88,6 +90,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         (token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] }).role = user.role;
         (token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] }).reportIds = user.reportIds;
         (token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] }).rlsRoles = user.rlsRoles;
+        token.name = user.name;
+        token.email = user.email;
         return token;
       }
 
@@ -99,6 +103,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           enrichedToken.role = currentUser.role;
           enrichedToken.reportIds = currentUser.reportIds;
           enrichedToken.rlsRoles = currentUser.rlsRoles;
+          token.name = currentUser.name;
+          token.email = currentUser.email;
         }
       }
 
@@ -111,6 +117,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       session.user.id = enrichedToken.id;
+      if (typeof token.name === 'string') {
+        session.user.name = token.name;
+      }
+      if (typeof token.email === 'string') {
+        session.user.email = token.email;
+      }
       session.user.role = enrichedToken.role;
       session.user.reportIds = enrichedToken.reportIds ?? [];
       session.user.rlsRoles = enrichedToken.rlsRoles;

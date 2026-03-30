@@ -4,11 +4,18 @@ import * as azureRuntime from '@/lib/dalAzureRuntime';
 
 export type UserRole = 'admin' | 'client';
 
+export interface ClientConfig {
+  id: string;
+  displayName: string;
+  isActive: boolean;
+}
+
 export interface SessionAuthUser {
   id: string;
   name: string;
   email?: string;
   role: UserRole;
+  clientId?: string;
   reportIds: string[];
   rlsRoles?: string[];
 }
@@ -16,6 +23,8 @@ export interface SessionAuthUser {
 export interface PublicReport {
   id: string;
   displayName: string;
+  clientId?: string;
+  clientName?: string;
   hasAiAgents?: boolean;
   aiAgentCount?: number;
 }
@@ -23,17 +32,20 @@ export interface PublicReport {
 export interface SecureReportConfig {
   id: string;
   displayName: string;
+  clientId: string;
   workspaceId: string;
   reportId: string;
   rlsRoles?: string[];
   adminRlsRoles?: string[];
   adminRlsUsername?: string;
+  isActive?: boolean;
 }
 
 export interface CreateUserInput {
   username: string;
   email: string;
   role: UserRole;
+  clientId?: string;
   reportIds: string[];
   rlsRoles?: string[];
   isActive?: boolean;
@@ -43,6 +55,7 @@ export interface CreateUserInput {
 export interface CreateReportInput {
   id: string;
   displayName: string;
+  clientId: string;
   workspaceId: string;
   reportId: string;
   rlsRoles?: string[];
@@ -54,6 +67,7 @@ export interface CreateReportInput {
 export interface AIAgentConfig {
   id: string;
   name: string;
+  clientId: string;
   publishedUrl: string;
   mcpUrl?: string;
   mcpToolName?: string;
@@ -63,11 +77,22 @@ export interface AIAgentConfig {
 
 export interface CreateAIAgentInput {
   name: string;
+  clientId: string;
   publishedUrl: string;
   mcpUrl?: string;
   mcpToolName?: string;
   reportIds: string[];
   isActive?: boolean;
+}
+
+export interface UpdateUserInput extends CreateUserInput {
+  id: string;
+}
+
+export type UpdateReportInput = CreateReportInput;
+
+export interface UpdateAIAgentInput extends CreateAIAgentInput {
+  id: string;
 }
 
 function assertAzureSqlConfigured(): void {
@@ -96,6 +121,21 @@ export async function getSessionUserById(userId: string): Promise<SessionAuthUse
   return azureRuntime.getSessionUserById(userId);
 }
 
+export async function listClientsForAdmin(): Promise<ClientConfig[]> {
+  await ensureDataLayer();
+  return azureRuntime.listClientsForAdmin();
+}
+
+export async function createClientFromAdmin(input: { id: string; displayName: string; isActive?: boolean }): Promise<void> {
+  await ensureDataLayer();
+  await azureRuntime.createClientFromAdmin(input);
+}
+
+export async function updateClientFromAdmin(input: { id: string; displayName: string; isActive?: boolean }): Promise<void> {
+  await ensureDataLayer();
+  await azureRuntime.updateClientFromAdmin(input);
+}
+
 export async function getAccessibleReportsForUser(userId: string, role: UserRole): Promise<PublicReport[]> {
   await ensureDataLayer();
   return azureRuntime.getAccessibleReportsForUser(userId, role);
@@ -115,6 +155,7 @@ export async function listUsersForAdmin(): Promise<Array<{
   username: string;
   email?: string;
   role: UserRole;
+  clientId?: string;
   isActive: boolean;
   expiresAt?: string;
   reportIds: string[];
@@ -134,9 +175,29 @@ export async function createUserFromAdmin(input: CreateUserInput): Promise<void>
   await azureRuntime.createUserFromAdmin(input);
 }
 
+export async function updateUserFromAdmin(input: UpdateUserInput): Promise<void> {
+  await ensureDataLayer();
+  await azureRuntime.updateUserFromAdmin(input);
+}
+
+export async function deleteUserFromAdmin(id: string): Promise<void> {
+  await ensureDataLayer();
+  await azureRuntime.deleteUserFromAdmin(id);
+}
+
 export async function createReportFromAdmin(input: CreateReportInput): Promise<void> {
   await ensureDataLayer();
   await azureRuntime.createReportFromAdmin(input);
+}
+
+export async function updateReportFromAdmin(input: UpdateReportInput): Promise<void> {
+  await ensureDataLayer();
+  await azureRuntime.updateReportFromAdmin(input);
+}
+
+export async function deleteReportFromAdmin(id: string): Promise<void> {
+  await ensureDataLayer();
+  await azureRuntime.deleteReportFromAdmin(id);
 }
 
 export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
@@ -147,6 +208,16 @@ export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
 export async function createAIAgentFromAdmin(input: CreateAIAgentInput): Promise<void> {
   await ensureDataLayer();
   await azureRuntime.createAIAgentFromAdmin(input);
+}
+
+export async function updateAIAgentFromAdmin(input: UpdateAIAgentInput): Promise<void> {
+  await ensureDataLayer();
+  await azureRuntime.updateAIAgentFromAdmin(input);
+}
+
+export async function deleteAIAgentFromAdmin(id: string): Promise<void> {
+  await ensureDataLayer();
+  await azureRuntime.deleteAIAgentFromAdmin(id);
 }
 
 export async function getAIAgentsForReport(params: {

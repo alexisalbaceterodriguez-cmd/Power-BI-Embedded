@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { signOut, useSession } from 'next-auth/react';
 import Sidebar from '@/components/Sidebar';
@@ -14,6 +14,8 @@ const EmbeddedReport = dynamic(() => import('@/components/PowerBIEmbed'), {
 interface PublicReport {
   id: string;
   displayName: string;
+  clientId?: string;
+  clientName?: string;
   hasAiAgents?: boolean;
   aiAgentCount?: number;
 }
@@ -36,6 +38,23 @@ export default function Home() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [agentsError, setAgentsError] = useState<string | null>(null);
+
+  const activeReport = useMemo(
+    () => reports.find((report) => report.id === activeReportId) ?? null,
+    [reports, activeReportId]
+  );
+
+  const showAiLauncher = Boolean(activeReportId && (activeReport?.hasAiAgents ?? false) && agents.length > 0);
+  const activeClientLabel = activeReport?.clientName ?? activeReport?.clientId ?? 'Cliente no asignado';
+
+  const handleSelectReport = useCallback((reportId: string) => {
+    setActiveReportId(reportId);
+    setAgentsOpen(false);
+  }, []);
+
+  const handleOpenAi = useCallback(() => {
+    setAgentsOpen(true);
+  }, []);
 
   useEffect(() => {
     if (status !== 'loading') {
@@ -96,10 +115,16 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [status]);
+  }, [status, reloadReportsKey]);
 
   useEffect(() => {
     if (!activeReportId || status !== 'authenticated') {
+      setAgents([]);
+      setAgentsOpen(false);
+      setAgentsError(null);
+      return;
+    }
+    if (!(activeReport?.hasAiAgents ?? false)) {
       setAgents([]);
       setAgentsOpen(false);
       setAgentsError(null);
@@ -133,7 +158,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [activeReportId, status]);
+  }, [activeReportId, activeReport?.hasAiAgents, status]);
 
   if (status === 'loading') {
     if (authLoadingTimedOut) {
@@ -158,11 +183,17 @@ export default function Home() {
   return (
     <div className="app-shell">
       <Header
-        showAiLauncher={Boolean(activeReportId && agents.length > 0)}
+        showAiLauncher={showAiLauncher}
         aiAgentCount={agents.length}
-        onOpenAi={() => setAgentsOpen(true)}
+        clientName={activeClientLabel}
+        onOpenAi={handleOpenAi}
       />
-      <Sidebar reports={reports} activeReportId={activeReportId} onSelectReport={setActiveReportId} />
+      <Sidebar
+        reports={reports}
+        activeReportId={activeReportId}
+        onSelectReport={handleSelectReport}
+        activeClientName={activeClientLabel}
+      />
 
       <main className="app-main" id="main-content">
         {activeReportId && agentsOpen ? (
@@ -189,6 +220,13 @@ export default function Home() {
           </div>
         ) : activeReportId ? (
           <>
+            <section className="report-context-strip" aria-live="polite">
+              <div>
+                <p className="report-context-eyebrow">Cliente activo</p>
+                <strong className="report-context-client">{activeClientLabel}</strong>
+              </div>
+              <div className="report-context-name">{activeReport?.displayName ?? activeReportId}</div>
+            </section>
             {agentsError ? (
               <div style={{ marginBottom: '0.75rem', color: 'var(--status-error)', fontSize: '0.875rem' }}>
                 {agentsError}

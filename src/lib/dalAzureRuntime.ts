@@ -4,12 +4,16 @@ import sql, { ConnectionPool, IResult } from 'mssql';
 import { randomUUID } from 'node:crypto';
 import type {
   AIAgentConfig,
+  ClientConfig,
   CreateAIAgentInput,
   CreateReportInput,
   CreateUserInput,
   PublicReport,
   SecureReportConfig,
   SessionAuthUser,
+  UpdateAIAgentInput,
+  UpdateReportInput,
+  UpdateUserInput,
   UserRole,
 } from '@/lib/dal';
 
@@ -18,13 +22,21 @@ interface DbUser {
   username: string;
   email: string | null;
   role: UserRole;
+  client_id: string | null;
   is_active: boolean | number;
   expires_at: string | null;
+}
+
+interface DbClient {
+  id: string;
+  display_name: string;
+  is_active: boolean | number;
 }
 
 interface DbReport {
   id: string;
   display_name: string;
+  client_id: string;
   workspace_id: string;
   report_id: string;
   rls_roles_json: string | null;
@@ -36,6 +48,7 @@ interface DbReport {
 interface DbAIAgent {
   id: string;
   name: string;
+  client_id: string;
   published_url: string;
   mcp_url: string | null;
   mcp_tool_name: string | null;
@@ -56,6 +69,12 @@ function normalizeEmail(email?: string | null): string | undefined {
 
 function normalizeUsername(username: string): string {
   return username.trim();
+}
+
+function normalizeClientId(clientId?: string | null): string | undefined {
+  if (!clientId) return undefined;
+  const normalized = clientId.trim().toLowerCase();
+  return normalized || undefined;
 }
 
 function isFutureDate(value?: string | null): boolean {
@@ -81,6 +100,18 @@ function toBit(value: boolean | number): number {
 function toBoolean(value: boolean | number | null | undefined): boolean {
   if (typeof value === 'boolean') return value;
   return Number(value ?? 0) === 1;
+}
+
+function normalizeIdList(values: string[]): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const raw of values) {
+    const value = raw.trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    output.push(value);
+  }
+  return output;
 }
 
 function getRequiredEnv(name: string): string {
@@ -110,6 +141,7 @@ function getBootstrapReports(): CreateReportInput[] {
     return [{
       id: 'default-report',
       displayName: 'Default Report',
+      clientId: 'cliente-1',
       workspaceId: process.env.WORKSPACE_ID,
       reportId: process.env.REPORT_ID,
       isActive: true,
@@ -119,11 +151,37 @@ function getBootstrapReports(): CreateReportInput[] {
   return [];
 }
 
+function getBootstrapClients(): Array<{ id: string; displayName: string; isActive?: boolean }> {
+  const fromEnv = process.env.BOOTSTRAP_CLIENTS_JSON;
+  if (fromEnv) {
+    try {
+      const parsed = JSON.parse(fromEnv) as Array<{ id: string; displayName?: string; isActive?: boolean }>;
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((client) => ({
+            id: normalizeClientId(client.id) ?? '',
+            displayName: (client.displayName ?? client.id ?? '').trim(),
+            isActive: client.isActive,
+          }))
+          .filter((client) => Boolean(client.id && client.displayName));
+      }
+    } catch {
+      // no-op
+    }
+  }
+
+  return [
+    { id: 'cliente-1', displayName: 'Cliente 1', isActive: true },
+    { id: 'cliente-2', displayName: 'Cliente 2', isActive: true },
+  ];
+}
+
 function getBootstrapUsers(): Array<{
   id?: string;
   username: string;
   email?: string;
   role: UserRole;
+  clientId?: string;
   reportIds?: string[];
   rlsRoles?: string[];
   isActive?: boolean;
@@ -138,6 +196,7 @@ function getBootstrapUsers(): Array<{
       username: string;
       email?: string;
       role: UserRole;
+      clientId?: string;
       reportIds?: string[];
       rlsRoles?: string[];
       isActive?: boolean;
@@ -201,6 +260,17 @@ async function getPool(): Promise<ConnectionPool> {
 }
 
 const schemaSql = `
+IF OBJECT_ID('dbo.clients', 'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.clients (
+    id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    display_name NVARCHAR(256) NOT NULL,
+    is_active BIT NOT NULL DEFAULT 1,
+    created_at DATETIME2 NOT NULL,
+    updated_at DATETIME2 NOT NULL
+  );
+END;
+
 IF OBJECT_ID('dbo.users', 'U') IS NULL
 BEGIN
   CREATE TABLE dbo.users (
@@ -214,6 +284,11 @@ BEGIN
     created_at DATETIME2 NOT NULL,
     updated_at DATETIME2 NOT NULL
   );
+END;
+
+IF COL_LENGTH('dbo.users', 'client_id') IS NULL
+BEGIN
+  ALTER TABLE dbo.users ADD client_id NVARCHAR(128) NULL;
 END;
 
 IF OBJECT_ID('dbo.reports', 'U') IS NULL
@@ -230,6 +305,11 @@ BEGIN
     created_at DATETIME2 NOT NULL,
     updated_at DATETIME2 NOT NULL
   );
+END;
+
+IF COL_LENGTH('dbo.reports', 'client_id') IS NULL
+BEGIN
+  ALTER TABLE dbo.reports ADD client_id NVARCHAR(128) NULL;
 END;
 
 IF OBJECT_ID('dbo.user_report_access', 'U') IS NULL
@@ -269,6 +349,11 @@ BEGIN
   );
 END;
 
+IF COL_LENGTH('dbo.ai_agents', 'client_id') IS NULL
+BEGIN
+  ALTER TABLE dbo.ai_agents ADD client_id NVARCHAR(128) NULL;
+END;
+
 IF OBJECT_ID('dbo.ai_agent_reports', 'U') IS NULL
 BEGIN
   CREATE TABLE dbo.ai_agent_reports (
@@ -301,6 +386,21 @@ BEGIN
     lock_until DATETIME2 NULL,
     updated_at DATETIME2 NOT NULL
   );
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_users_client_id' AND object_id = OBJECT_ID('dbo.users'))
+BEGIN
+  CREATE INDEX IX_users_client_id ON dbo.users(client_id);
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_reports_client_id' AND object_id = OBJECT_ID('dbo.reports'))
+BEGIN
+  CREATE INDEX IX_reports_client_id ON dbo.reports(client_id);
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ai_agents_client_id' AND object_id = OBJECT_ID('dbo.ai_agents'))
+BEGIN
+  CREATE INDEX IX_ai_agents_client_id ON dbo.ai_agents(client_id);
 END;
 `;
 
@@ -349,22 +449,112 @@ async function toSessionUser(user: DbUser): Promise<SessionAuthUser> {
     name: user.username,
     email: user.email ?? undefined,
     role,
+    clientId: role === 'admin' ? undefined : (user.client_id ?? undefined),
     reportIds,
     rlsRoles: rlsRoles.length > 0 ? rlsRoles : undefined,
   };
+}
+
+async function ensureClientExists(clientIdRaw: string): Promise<string> {
+  const clientId = normalizeClientId(clientIdRaw);
+  if (!clientId) throw new Error('Client is required.');
+
+  const exists = await queryOne<{ id: string }>(
+    'SELECT TOP (1) id FROM clients WHERE id = @id AND is_active = 1',
+    (request) => request.input('id', sql.NVarChar(128), clientId)
+  );
+  if (!exists) throw new Error(`Client not found or inactive: ${clientId}`);
+  return clientId;
+}
+
+async function getReportClientId(reportId: string): Promise<string | null> {
+  const row = await queryOne<{ client_id: string | null }>(
+    'SELECT TOP (1) client_id FROM reports WHERE id = @reportId',
+    (request) => request.input('reportId', sql.NVarChar(128), reportId)
+  );
+  return row?.client_id ?? null;
+}
+
+async function validateReportIdsBelongToClient(reportIds: string[], clientId: string): Promise<void> {
+  const normalizedIds = normalizeIdList(reportIds);
+  if (normalizedIds.length === 0) return;
+
+  for (const reportId of normalizedIds) {
+    const reportClientId = await getReportClientId(reportId);
+    if (!reportClientId) throw new Error(`Report not found: ${reportId}`);
+    if (reportClientId !== clientId) {
+      throw new Error(`Report ${reportId} does not belong to client ${clientId}`);
+    }
+  }
+}
+
+async function backfillDefaultClientsAndAssignments(): Promise<void> {
+  const clients = getBootstrapClients();
+  for (const client of clients) {
+    await queryRows(
+      `IF NOT EXISTS (SELECT 1 FROM clients WHERE id = @id)
+         INSERT INTO clients (id, display_name, is_active, created_at, updated_at)
+         VALUES (@id, @display_name, @is_active, @created_at, @updated_at)`,
+      (request) => {
+        request.input('id', sql.NVarChar(128), client.id);
+        request.input('display_name', sql.NVarChar(256), client.displayName);
+        request.input('is_active', sql.Bit, toBit(client.isActive !== false));
+        request.input('created_at', sql.DateTime2, nowIso());
+        request.input('updated_at', sql.DateTime2, nowIso());
+      }
+    );
+  }
+
+  await queryRows(
+    `UPDATE reports
+     SET client_id = 'cliente-1'
+     WHERE client_id IS NULL AND display_name IN ('Finance Controlling', 'Informe Webinar')`
+  );
+
+  await queryRows(
+    `UPDATE reports
+     SET client_id = 'cliente-2'
+      WHERE client_id IS NULL AND display_name IN ('Calculadora de precio optimo', 'Calculadora de precio óptimo')`
+  );
+
+  await queryRows(
+    `UPDATE reports
+     SET client_id = 'cliente-1'
+     WHERE client_id IS NULL`
+  );
+
+  await queryRows(
+    `UPDATE users
+     SET client_id = 'cliente-1'
+     WHERE role <> 'admin' AND client_id IS NULL`
+  );
+
+  await queryRows(
+    `UPDATE ai_agents
+     SET client_id = COALESCE(
+       (SELECT TOP (1) r.client_id
+        FROM ai_agent_reports ar
+        INNER JOIN reports r ON r.id = ar.report_id
+        WHERE ar.agent_id = ai_agents.id),
+       'cliente-1'
+     )
+     WHERE client_id IS NULL`
+  );
 }
 
 async function seedBootstrapData(): Promise<void> {
   const reportCount = await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM reports');
   if ((reportCount?.count ?? 0) === 0) {
     for (const report of getBootstrapReports()) {
+      const reportClientId = normalizeClientId(report.clientId) ?? 'cliente-1';
       await queryRows(
         `INSERT INTO reports
-          (id, display_name, workspace_id, report_id, rls_roles_json, admin_rls_roles_json, admin_rls_username, is_active, created_at, updated_at)
-         VALUES (@id, @display_name, @workspace_id, @report_id, @rls_roles_json, @admin_rls_roles_json, @admin_rls_username, @is_active, @created_at, @updated_at)`,
+          (id, display_name, client_id, workspace_id, report_id, rls_roles_json, admin_rls_roles_json, admin_rls_username, is_active, created_at, updated_at)
+         VALUES (@id, @display_name, @client_id, @workspace_id, @report_id, @rls_roles_json, @admin_rls_roles_json, @admin_rls_username, @is_active, @created_at, @updated_at)`,
         (request) => {
           request.input('id', sql.NVarChar(128), report.id);
           request.input('display_name', sql.NVarChar(256), report.displayName);
+          request.input('client_id', sql.NVarChar(128), reportClientId);
           request.input('workspace_id', sql.NVarChar(128), report.workspaceId);
           request.input('report_id', sql.NVarChar(128), report.reportId);
           request.input('rls_roles_json', sql.NVarChar(sql.MAX), JSON.stringify(report.rlsRoles ?? []));
@@ -388,8 +578,8 @@ async function seedBootstrapData(): Promise<void> {
   const adminId = randomUUID();
   await queryRows(
     `INSERT INTO users
-      (id, username, email, password_hash, role, is_active, expires_at, created_at, updated_at)
-     VALUES (@id, @username, @email, NULL, 'admin', 1, NULL, @created_at, @updated_at)`,
+      (id, username, email, password_hash, role, client_id, is_active, expires_at, created_at, updated_at)
+     VALUES (@id, @username, @email, NULL, 'admin', NULL, 1, NULL, @created_at, @updated_at)`,
     (request) => {
       request.input('id', sql.NVarChar(64), adminId);
       request.input('username', sql.NVarChar(128), adminUsername);
@@ -424,15 +614,17 @@ async function seedBootstrapData(): Promise<void> {
     if (!normalizedUsername || normalizedUsername.toLowerCase() === adminUsername.toLowerCase()) continue;
 
     const userId = user.id ?? randomUUID();
+    const userClientId = normalizeClientId(user.clientId) ?? 'cliente-1';
     await queryRows(
       `INSERT INTO users
-        (id, username, email, password_hash, role, is_active, expires_at, created_at, updated_at)
-       VALUES (@id, @username, @email, NULL, @role, @is_active, @expires_at, @created_at, @updated_at)`,
+        (id, username, email, password_hash, role, client_id, is_active, expires_at, created_at, updated_at)
+       VALUES (@id, @username, @email, NULL, @role, @client_id, @is_active, @expires_at, @created_at, @updated_at)`,
       (request) => {
         request.input('id', sql.NVarChar(64), userId);
         request.input('username', sql.NVarChar(128), normalizedUsername);
         request.input('email', sql.NVarChar(256), normalizedEmail);
         request.input('role', sql.NVarChar(16), user.role);
+        request.input('client_id', sql.NVarChar(128), user.role === 'admin' ? null : userClientId);
         request.input('is_active', sql.Bit, toBit(user.isActive !== false));
         request.input('expires_at', sql.DateTime2, user.expiresAt ?? null);
         request.input('created_at', sql.DateTime2, nowIso());
@@ -478,13 +670,15 @@ async function seedBootstrapData(): Promise<void> {
 
   for (const agent of getBootstrapAIAgents()) {
     const agentId = randomUUID();
+    const agentClientId = normalizeClientId(agent.clientId) ?? 'cliente-1';
     await queryRows(
       `INSERT INTO ai_agents
-        (id, name, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
-       VALUES (@id, @name, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`,
+        (id, name, client_id, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
+       VALUES (@id, @name, @client_id, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`,
       (request) => {
         request.input('id', sql.NVarChar(64), agentId);
         request.input('name', sql.NVarChar(256), agent.name);
+        request.input('client_id', sql.NVarChar(128), agentClientId);
         request.input('published_url', sql.NVarChar(1024), agent.publishedUrl);
         request.input('mcp_url', sql.NVarChar(1024), agent.mcpUrl ?? null);
         request.input('mcp_tool_name', sql.NVarChar(256), agent.mcpToolName ?? null);
@@ -516,6 +710,7 @@ export async function ensureDataLayer(): Promise<void> {
   const p = await getPool();
   await p.request().batch(schemaSql);
   await seedBootstrapData();
+  await backfillDefaultClientsAndAssignments();
   initialized = true;
 }
 
@@ -525,7 +720,7 @@ export async function findUserByEmailForMicrosoft(email: string): Promise<Sessio
   if (!normalized) return null;
 
   const user = await queryOne<DbUser>(
-    `SELECT TOP (1) id, username, email, role, is_active, expires_at
+    `SELECT TOP (1) id, username, email, role, client_id, is_active, expires_at
      FROM users
      WHERE LOWER(email) = LOWER(@email)`,
     (request) => request.input('email', sql.NVarChar(256), normalized)
@@ -533,6 +728,65 @@ export async function findUserByEmailForMicrosoft(email: string): Promise<Sessio
 
   if (!user || !userIsActive(user)) return null;
   return toSessionUser(user);
+}
+
+export async function listClientsForAdmin(): Promise<ClientConfig[]> {
+  await ensureDataLayer();
+  const rows = await queryRows<DbClient>(
+    `SELECT id, display_name, is_active
+     FROM clients
+     ORDER BY display_name ASC`
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    displayName: row.display_name,
+    isActive: toBoolean(row.is_active),
+  }));
+}
+
+export async function createClientFromAdmin(input: { id: string; displayName: string; isActive?: boolean }): Promise<void> {
+  await ensureDataLayer();
+
+  const clientId = normalizeClientId(input.id);
+  if (!clientId) throw new Error('Client id is required.');
+  const displayName = input.displayName.trim();
+  if (!displayName) throw new Error('Client name is required.');
+
+  await queryRows(
+    `INSERT INTO clients (id, display_name, is_active, created_at, updated_at)
+     VALUES (@id, @display_name, @is_active, @created_at, @updated_at)`,
+    (request) => {
+      request.input('id', sql.NVarChar(128), clientId);
+      request.input('display_name', sql.NVarChar(256), displayName);
+      request.input('is_active', sql.Bit, toBit(input.isActive !== false));
+      request.input('created_at', sql.DateTime2, nowIso());
+      request.input('updated_at', sql.DateTime2, nowIso());
+    }
+  );
+}
+
+export async function updateClientFromAdmin(input: { id: string; displayName: string; isActive?: boolean }): Promise<void> {
+  await ensureDataLayer();
+
+  const clientId = normalizeClientId(input.id);
+  if (!clientId) throw new Error('Client id is required.');
+  const displayName = input.displayName.trim();
+  if (!displayName) throw new Error('Client name is required.');
+
+  await queryRows(
+    `UPDATE clients
+     SET display_name = @display_name,
+         is_active = @is_active,
+         updated_at = @updated_at
+     WHERE id = @id`,
+    (request) => {
+      request.input('id', sql.NVarChar(128), clientId);
+      request.input('display_name', sql.NVarChar(256), displayName);
+      request.input('is_active', sql.Bit, toBit(input.isActive !== false));
+      request.input('updated_at', sql.DateTime2, nowIso());
+    }
+  );
 }
 
 export async function findUserByMicrosoftClaims(claimCandidates: string[]): Promise<SessionAuthUser | null> {
@@ -551,7 +805,7 @@ export async function getSessionUserById(userId: string): Promise<SessionAuthUse
   await ensureDataLayer();
 
   const user = await queryOne<DbUser>(
-    `SELECT TOP (1) id, username, email, role, is_active, expires_at
+    `SELECT TOP (1) id, username, email, role, client_id, is_active, expires_at
      FROM users
      WHERE id = @id`,
     (request) => request.input('id', sql.NVarChar(64), userId)
@@ -564,31 +818,45 @@ export async function getSessionUserById(userId: string): Promise<SessionAuthUse
 export async function getAccessibleReportsForUser(userId: string, role: UserRole): Promise<PublicReport[]> {
   await ensureDataLayer();
 
+  const userClient = role === 'admin'
+    ? undefined
+    : await queryOne<{ client_id: string | null }>(
+      'SELECT TOP (1) client_id FROM users WHERE id = @userId',
+      (request) => request.input('userId', sql.NVarChar(64), userId)
+    );
+
   const rows = role === 'admin'
-    ? await queryRows<{ id: string; display_name: string; ai_agent_count: number }>(
-      `SELECT r.id, r.display_name, COUNT(a.id) AS ai_agent_count
+    ? await queryRows<{ id: string; display_name: string; client_id: string; client_display_name: string | null; ai_agent_count: number }>(
+      `SELECT r.id, r.display_name, r.client_id, c.display_name AS client_display_name, COUNT(a.id) AS ai_agent_count
        FROM reports r
+       LEFT JOIN clients c ON c.id = r.client_id
        LEFT JOIN ai_agent_reports ar ON ar.report_id = r.id
-       LEFT JOIN ai_agents a ON a.id = ar.agent_id AND a.is_active = 1
+       LEFT JOIN ai_agents a ON a.id = ar.agent_id AND a.is_active = 1 AND a.client_id = r.client_id
        WHERE r.is_active = 1
-       GROUP BY r.id, r.display_name
+       GROUP BY r.id, r.display_name, r.client_id, c.display_name
        ORDER BY r.display_name ASC`
     )
-    : await queryRows<{ id: string; display_name: string; ai_agent_count: number }>(
-      `SELECT r.id, r.display_name, COUNT(a.id) AS ai_agent_count
+    : await queryRows<{ id: string; display_name: string; client_id: string; client_display_name: string | null; ai_agent_count: number }>(
+      `SELECT r.id, r.display_name, r.client_id, c.display_name AS client_display_name, COUNT(a.id) AS ai_agent_count
        FROM reports r
+       LEFT JOIN clients c ON c.id = r.client_id
        INNER JOIN user_report_access ura ON ura.report_id = r.id
        LEFT JOIN ai_agent_reports ar ON ar.report_id = r.id
-       LEFT JOIN ai_agents a ON a.id = ar.agent_id AND a.is_active = 1
-       WHERE ura.user_id = @userId AND r.is_active = 1
-       GROUP BY r.id, r.display_name
+       LEFT JOIN ai_agents a ON a.id = ar.agent_id AND a.is_active = 1 AND a.client_id = r.client_id
+       WHERE ura.user_id = @userId AND r.is_active = 1 AND r.client_id = @clientId
+       GROUP BY r.id, r.display_name, r.client_id, c.display_name
        ORDER BY r.display_name ASC`,
-      (request) => request.input('userId', sql.NVarChar(64), userId)
+      (request) => {
+        request.input('userId', sql.NVarChar(64), userId);
+        request.input('clientId', sql.NVarChar(128), normalizeClientId(userClient?.client_id) ?? 'cliente-1');
+      }
     );
 
   return rows.map((row) => ({
     id: row.id,
     displayName: row.display_name,
+    clientId: row.client_id,
+    clientName: row.client_display_name ?? row.client_id,
     hasAiAgents: Number(row.ai_agent_count) > 0,
     aiAgentCount: Number(row.ai_agent_count),
   }));
@@ -602,7 +870,7 @@ export async function getSecureReportConfigForUser(params: {
   await ensureDataLayer();
 
   const report = await queryOne<DbReport>(
-    `SELECT TOP (1) id, display_name, workspace_id, report_id, rls_roles_json, admin_rls_roles_json, admin_rls_username, is_active
+    `SELECT TOP (1) id, display_name, client_id, workspace_id, report_id, rls_roles_json, admin_rls_roles_json, admin_rls_username, is_active
      FROM reports WHERE id = @reportId`,
     (request) => request.input('reportId', sql.NVarChar(128), params.requestedReportId)
   );
@@ -610,6 +878,13 @@ export async function getSecureReportConfigForUser(params: {
   if (!report || !toBoolean(report.is_active)) return null;
 
   if (params.role !== 'admin') {
+    const user = await queryOne<{ client_id: string | null }>(
+      'SELECT TOP (1) client_id FROM users WHERE id = @userId',
+      (request) => request.input('userId', sql.NVarChar(64), params.userId)
+    );
+    const userClientId = normalizeClientId(user?.client_id);
+    if (!userClientId || userClientId !== report.client_id) return null;
+
     const access = await queryOne<{ allowed: number }>(
       `SELECT TOP (1) 1 AS allowed
        FROM user_report_access
@@ -625,6 +900,7 @@ export async function getSecureReportConfigForUser(params: {
   return {
     id: report.id,
     displayName: report.display_name,
+    clientId: report.client_id,
     workspaceId: report.workspace_id,
     reportId: report.report_id,
     rlsRoles: parseJsonArray(report.rls_roles_json),
@@ -638,6 +914,7 @@ export async function listUsersForAdmin(): Promise<Array<{
   username: string;
   email?: string;
   role: UserRole;
+  clientId?: string;
   isActive: boolean;
   expiresAt?: string;
   reportIds: string[];
@@ -645,7 +922,7 @@ export async function listUsersForAdmin(): Promise<Array<{
 }>> {
   await ensureDataLayer();
   const rows = await queryRows<DbUser>(
-    `SELECT id, username, email, role, is_active, expires_at
+    `SELECT id, username, email, role, client_id, is_active, expires_at
      FROM users
      ORDER BY username ASC`
   );
@@ -655,6 +932,7 @@ export async function listUsersForAdmin(): Promise<Array<{
     username: string;
     email?: string;
     role: UserRole;
+    clientId?: string;
     isActive: boolean;
     expiresAt?: string;
     reportIds: string[];
@@ -667,6 +945,7 @@ export async function listUsersForAdmin(): Promise<Array<{
       username: row.username,
       email: row.email ?? undefined,
       role: row.role,
+      clientId: row.client_id ?? undefined,
       isActive: toBoolean(row.is_active),
       expiresAt: row.expires_at ?? undefined,
       reportIds: await getUserReportIds(row.id),
@@ -680,21 +959,21 @@ export async function listUsersForAdmin(): Promise<Array<{
 export async function listReportsForAdmin(): Promise<SecureReportConfig[]> {
   await ensureDataLayer();
   const rows = await queryRows<DbReport>(
-    `SELECT id, display_name, workspace_id, report_id, rls_roles_json, admin_rls_roles_json, admin_rls_username, is_active
+    `SELECT id, display_name, client_id, workspace_id, report_id, rls_roles_json, admin_rls_roles_json, admin_rls_username, is_active
      FROM reports
      ORDER BY display_name ASC`
   );
 
-  return rows
-    .filter((row) => toBoolean(row.is_active))
-    .map((row) => ({
+  return rows.map((row) => ({
       id: row.id,
       displayName: row.display_name,
+      clientId: row.client_id,
       workspaceId: row.workspace_id,
       reportId: row.report_id,
       rlsRoles: parseJsonArray(row.rls_roles_json),
       adminRlsRoles: parseJsonArray(row.admin_rls_roles_json),
       adminRlsUsername: row.admin_rls_username ?? undefined,
+      isActive: toBoolean(row.is_active),
     }));
 }
 
@@ -705,16 +984,24 @@ export async function createUserFromAdmin(input: CreateUserInput): Promise<void>
   if (!username) throw new Error('Username is required.');
   const email = normalizeEmail(input.email);
   if (!email) throw new Error('Email is required for Microsoft authentication mapping.');
+  const userClientId = input.role === 'admin'
+    ? undefined
+    : await ensureClientExists(input.clientId ?? '');
+
+  if (input.role !== 'admin') {
+    await validateReportIdsBelongToClient(input.reportIds, userClientId!);
+  }
 
   const userId = randomUUID();
   await queryRows(
-    `INSERT INTO users (id, username, email, password_hash, role, is_active, expires_at, created_at, updated_at)
-     VALUES (@id, @username, @email, NULL, @role, @is_active, @expires_at, @created_at, @updated_at)`,
+    `INSERT INTO users (id, username, email, password_hash, role, client_id, is_active, expires_at, created_at, updated_at)
+     VALUES (@id, @username, @email, NULL, @role, @client_id, @is_active, @expires_at, @created_at, @updated_at)`,
     (request) => {
       request.input('id', sql.NVarChar(64), userId);
       request.input('username', sql.NVarChar(128), username);
       request.input('email', sql.NVarChar(256), email);
       request.input('role', sql.NVarChar(16), input.role);
+      request.input('client_id', sql.NVarChar(128), input.role === 'admin' ? null : userClientId!);
       request.input('is_active', sql.Bit, toBit(input.isActive !== false));
       request.input('expires_at', sql.DateTime2, input.expiresAt ?? null);
       request.input('created_at', sql.DateTime2, nowIso());
@@ -722,7 +1009,7 @@ export async function createUserFromAdmin(input: CreateUserInput): Promise<void>
     }
   );
 
-  for (const reportId of input.reportIds) {
+  for (const reportId of normalizeIdList(input.reportIds)) {
     await queryRows(
       `INSERT INTO user_report_access (user_id, report_id, created_at)
        SELECT @user_id, @report_id, @created_at
@@ -737,7 +1024,7 @@ export async function createUserFromAdmin(input: CreateUserInput): Promise<void>
     );
   }
 
-  for (const roleNameRaw of input.rlsRoles ?? []) {
+  for (const roleNameRaw of normalizeIdList(input.rlsRoles ?? [])) {
     const roleName = roleNameRaw.trim();
     if (!roleName) continue;
 
@@ -756,16 +1043,111 @@ export async function createUserFromAdmin(input: CreateUserInput): Promise<void>
   }
 }
 
+export async function updateUserFromAdmin(input: UpdateUserInput): Promise<void> {
+  await ensureDataLayer();
+
+  const userId = input.id.trim();
+  if (!userId) throw new Error('User id is required.');
+
+  const username = normalizeUsername(input.username);
+  if (!username) throw new Error('Username is required.');
+
+  const email = normalizeEmail(input.email);
+  if (!email) throw new Error('Email is required for Microsoft authentication mapping.');
+  const userClientId = input.role === 'admin'
+    ? undefined
+    : await ensureClientExists(input.clientId ?? '');
+
+  if (input.role !== 'admin') {
+    await validateReportIdsBelongToClient(input.reportIds, userClientId!);
+  }
+
+  const existingUser = await queryOne<{ id: string }>(
+    'SELECT TOP (1) id FROM users WHERE id = @id',
+    (request) => request.input('id', sql.NVarChar(64), userId)
+  );
+  if (!existingUser) throw new Error('User not found.');
+
+  await queryRows(
+    `UPDATE users
+     SET username = @username,
+         email = @email,
+         role = @role,
+       client_id = @client_id,
+         is_active = @is_active,
+         expires_at = @expires_at,
+         updated_at = @updated_at
+     WHERE id = @id`,
+    (request) => {
+      request.input('id', sql.NVarChar(64), userId);
+      request.input('username', sql.NVarChar(128), username);
+      request.input('email', sql.NVarChar(256), email);
+      request.input('role', sql.NVarChar(16), input.role);
+      request.input('client_id', sql.NVarChar(128), input.role === 'admin' ? null : userClientId!);
+      request.input('is_active', sql.Bit, toBit(input.isActive !== false));
+      request.input('expires_at', sql.DateTime2, input.expiresAt ?? null);
+      request.input('updated_at', sql.DateTime2, nowIso());
+    }
+  );
+
+  await queryRows(
+    'DELETE FROM user_report_access WHERE user_id = @userId',
+    (request) => request.input('userId', sql.NVarChar(64), userId)
+  );
+
+  for (const reportId of normalizeIdList(input.reportIds)) {
+    await queryRows(
+      `INSERT INTO user_report_access (user_id, report_id, created_at)
+       SELECT @user_id, @report_id, @created_at`,
+      (request) => {
+        request.input('user_id', sql.NVarChar(64), userId);
+        request.input('report_id', sql.NVarChar(128), reportId);
+        request.input('created_at', sql.DateTime2, nowIso());
+      }
+    );
+  }
+
+  await queryRows(
+    'DELETE FROM user_rls_roles WHERE user_id = @userId',
+    (request) => request.input('userId', sql.NVarChar(64), userId)
+  );
+
+  for (const roleName of normalizeIdList(input.rlsRoles ?? [])) {
+    await queryRows(
+      `INSERT INTO user_rls_roles (user_id, role_name, created_at)
+       SELECT @user_id, @role_name, @created_at`,
+      (request) => {
+        request.input('user_id', sql.NVarChar(64), userId);
+        request.input('role_name', sql.NVarChar(128), roleName);
+        request.input('created_at', sql.DateTime2, nowIso());
+      }
+    );
+  }
+}
+
+export async function deleteUserFromAdmin(id: string): Promise<void> {
+  await ensureDataLayer();
+  const userId = id.trim();
+  if (!userId) throw new Error('User id is required.');
+
+  await queryRows(
+    'DELETE FROM users WHERE id = @id',
+    (request) => request.input('id', sql.NVarChar(64), userId)
+  );
+}
+
 export async function createReportFromAdmin(input: CreateReportInput): Promise<void> {
   await ensureDataLayer();
+  const clientId = await ensureClientExists(input.clientId);
 
   await queryRows(
     `INSERT INTO reports
-      (id, display_name, workspace_id, report_id, rls_roles_json, admin_rls_roles_json, admin_rls_username, is_active, created_at, updated_at)
-     VALUES (@id, @display_name, @workspace_id, @report_id, @rls_roles_json, @admin_rls_roles_json, @admin_rls_username, @is_active, @created_at, @updated_at)`,
+      (id, display_name, client_id, workspace_id, report_id, rls_roles_json, admin_rls_roles_json, admin_rls_username, is_active, created_at, updated_at)
+     VALUES (@id, @display_name, @client_id, @workspace_id, @report_id, @rls_roles_json, @admin_rls_roles_json, @admin_rls_username, @is_active, @created_at, @updated_at)`,
     (request) => {
       request.input('id', sql.NVarChar(128), input.id);
       request.input('display_name', sql.NVarChar(256), input.displayName);
+      request.input('client_id', sql.NVarChar(128), clientId);
       request.input('workspace_id', sql.NVarChar(128), input.workspaceId);
       request.input('report_id', sql.NVarChar(128), input.reportId);
       request.input('rls_roles_json', sql.NVarChar(sql.MAX), JSON.stringify(input.rlsRoles ?? []));
@@ -778,11 +1160,56 @@ export async function createReportFromAdmin(input: CreateReportInput): Promise<v
   );
 }
 
+export async function updateReportFromAdmin(input: UpdateReportInput): Promise<void> {
+  await ensureDataLayer();
+
+  const reportId = input.id.trim();
+  if (!reportId) throw new Error('Report id is required.');
+  const clientId = await ensureClientExists(input.clientId);
+
+  await queryRows(
+    `UPDATE reports
+     SET display_name = @display_name,
+         client_id = @client_id,
+         workspace_id = @workspace_id,
+         report_id = @report_id,
+         rls_roles_json = @rls_roles_json,
+         admin_rls_roles_json = @admin_rls_roles_json,
+         admin_rls_username = @admin_rls_username,
+         is_active = @is_active,
+         updated_at = @updated_at
+     WHERE id = @id`,
+    (request) => {
+      request.input('id', sql.NVarChar(128), reportId);
+      request.input('display_name', sql.NVarChar(256), input.displayName.trim());
+      request.input('client_id', sql.NVarChar(128), clientId);
+      request.input('workspace_id', sql.NVarChar(128), input.workspaceId.trim());
+      request.input('report_id', sql.NVarChar(128), input.reportId.trim());
+      request.input('rls_roles_json', sql.NVarChar(sql.MAX), JSON.stringify(normalizeIdList(input.rlsRoles ?? [])));
+      request.input('admin_rls_roles_json', sql.NVarChar(sql.MAX), JSON.stringify(normalizeIdList(input.adminRlsRoles ?? [])));
+      request.input('admin_rls_username', sql.NVarChar(256), input.adminRlsUsername?.trim() || null);
+      request.input('is_active', sql.Bit, toBit(input.isActive !== false));
+      request.input('updated_at', sql.DateTime2, nowIso());
+    }
+  );
+}
+
+export async function deleteReportFromAdmin(id: string): Promise<void> {
+  await ensureDataLayer();
+  const reportId = id.trim();
+  if (!reportId) throw new Error('Report id is required.');
+
+  await queryRows(
+    'DELETE FROM reports WHERE id = @id',
+    (request) => request.input('id', sql.NVarChar(128), reportId)
+  );
+}
+
 export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
   await ensureDataLayer();
 
   const rows = await queryRows<DbAIAgent>(
-    'SELECT id, name, published_url, mcp_url, mcp_tool_name, is_active FROM ai_agents ORDER BY name ASC'
+    'SELECT id, name, client_id, published_url, mcp_url, mcp_tool_name, is_active FROM ai_agents ORDER BY name ASC'
   );
 
   const reportRows = await queryRows<{ agent_id: string; report_id: string }>(
@@ -799,6 +1226,7 @@ export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
+    clientId: row.client_id,
     publishedUrl: row.published_url,
     mcpUrl: row.mcp_url ?? undefined,
     mcpToolName: row.mcp_tool_name ?? undefined,
@@ -809,18 +1237,21 @@ export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
 
 export async function createAIAgentFromAdmin(input: CreateAIAgentInput): Promise<void> {
   await ensureDataLayer();
+  const clientId = await ensureClientExists(input.clientId);
   if (!input.name.trim()) throw new Error('Agent name is required.');
   if (!input.publishedUrl.trim()) throw new Error('Published URL is required.');
   if (input.reportIds.length === 0) throw new Error('At least one report must be associated.');
+  await validateReportIdsBelongToClient(input.reportIds, clientId);
 
   const agentId = randomUUID();
   await queryRows(
     `INSERT INTO ai_agents
-      (id, name, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
-     VALUES (@id, @name, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`,
+      (id, name, client_id, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
+     VALUES (@id, @name, @client_id, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`,
     (request) => {
       request.input('id', sql.NVarChar(64), agentId);
       request.input('name', sql.NVarChar(256), input.name.trim());
+      request.input('client_id', sql.NVarChar(128), clientId);
       request.input('published_url', sql.NVarChar(1024), input.publishedUrl.trim());
       request.input('mcp_url', sql.NVarChar(1024), input.mcpUrl?.trim() || null);
       request.input('mcp_tool_name', sql.NVarChar(256), input.mcpToolName?.trim() || null);
@@ -830,7 +1261,7 @@ export async function createAIAgentFromAdmin(input: CreateAIAgentInput): Promise
     }
   );
 
-  for (const reportId of input.reportIds) {
+  for (const reportId of normalizeIdList(input.reportIds)) {
     await queryRows(
       `INSERT INTO ai_agent_reports (agent_id, report_id, created_at)
        SELECT @agent_id, @report_id, @created_at
@@ -846,6 +1277,68 @@ export async function createAIAgentFromAdmin(input: CreateAIAgentInput): Promise
   }
 }
 
+export async function updateAIAgentFromAdmin(input: UpdateAIAgentInput): Promise<void> {
+  await ensureDataLayer();
+
+  const agentId = input.id.trim();
+  if (!agentId) throw new Error('Agent id is required.');
+  const clientId = await ensureClientExists(input.clientId);
+  if (!input.name.trim()) throw new Error('Agent name is required.');
+  if (!input.publishedUrl.trim()) throw new Error('Published URL is required.');
+  if (input.reportIds.length === 0) throw new Error('At least one report must be associated.');
+  await validateReportIdsBelongToClient(input.reportIds, clientId);
+
+  await queryRows(
+    `UPDATE ai_agents
+     SET name = @name,
+       client_id = @client_id,
+         published_url = @published_url,
+         mcp_url = @mcp_url,
+         mcp_tool_name = @mcp_tool_name,
+         is_active = @is_active,
+         updated_at = @updated_at
+     WHERE id = @id`,
+    (request) => {
+      request.input('id', sql.NVarChar(64), agentId);
+      request.input('name', sql.NVarChar(256), input.name.trim());
+      request.input('client_id', sql.NVarChar(128), clientId);
+      request.input('published_url', sql.NVarChar(1024), input.publishedUrl.trim());
+      request.input('mcp_url', sql.NVarChar(1024), input.mcpUrl?.trim() || null);
+      request.input('mcp_tool_name', sql.NVarChar(256), input.mcpToolName?.trim() || null);
+      request.input('is_active', sql.Bit, toBit(input.isActive !== false));
+      request.input('updated_at', sql.DateTime2, nowIso());
+    }
+  );
+
+  await queryRows(
+    'DELETE FROM ai_agent_reports WHERE agent_id = @agentId',
+    (request) => request.input('agentId', sql.NVarChar(64), agentId)
+  );
+
+  for (const reportId of normalizeIdList(input.reportIds)) {
+    await queryRows(
+      `INSERT INTO ai_agent_reports (agent_id, report_id, created_at)
+       SELECT @agent_id, @report_id, @created_at`,
+      (request) => {
+        request.input('agent_id', sql.NVarChar(64), agentId);
+        request.input('report_id', sql.NVarChar(128), reportId);
+        request.input('created_at', sql.DateTime2, nowIso());
+      }
+    );
+  }
+}
+
+export async function deleteAIAgentFromAdmin(id: string): Promise<void> {
+  await ensureDataLayer();
+  const agentId = id.trim();
+  if (!agentId) throw new Error('Agent id is required.');
+
+  await queryRows(
+    'DELETE FROM ai_agents WHERE id = @id',
+    (request) => request.input('id', sql.NVarChar(64), agentId)
+  );
+}
+
 export async function getAIAgentsForReport(params: {
   userId: string;
   role: UserRole;
@@ -854,21 +1347,33 @@ export async function getAIAgentsForReport(params: {
   await ensureDataLayer();
 
   if (params.role !== 'admin') {
+    const user = await queryOne<{ client_id: string | null }>(
+      'SELECT TOP (1) client_id FROM users WHERE id = @userId',
+      (request) => request.input('userId', sql.NVarChar(64), params.userId)
+    );
+    const userClientId = normalizeClientId(user?.client_id);
+    if (!userClientId) return [];
+
     const access = await queryOne<{ allowed: number }>(
-      'SELECT TOP (1) 1 AS allowed FROM user_report_access WHERE user_id = @userId AND report_id = @reportId',
+      `SELECT TOP (1) 1 AS allowed
+       FROM user_report_access ura
+       INNER JOIN reports r ON r.id = ura.report_id
+       WHERE ura.user_id = @userId AND ura.report_id = @reportId AND r.client_id = @clientId`,
       (request) => {
         request.input('userId', sql.NVarChar(64), params.userId);
         request.input('reportId', sql.NVarChar(128), params.reportId);
+        request.input('clientId', sql.NVarChar(128), userClientId);
       }
     );
     if (!access) return [];
   }
 
   const rows = await queryRows<DbAIAgent>(
-    `SELECT a.id, a.name, a.published_url, a.mcp_url, a.mcp_tool_name, a.is_active
+    `SELECT a.id, a.name, a.client_id, a.published_url, a.mcp_url, a.mcp_tool_name, a.is_active
      FROM ai_agents a
      INNER JOIN ai_agent_reports ar ON ar.agent_id = a.id
-     WHERE ar.report_id = @reportId AND a.is_active = 1
+     INNER JOIN reports r ON r.id = ar.report_id
+     WHERE ar.report_id = @reportId AND a.is_active = 1 AND a.client_id = r.client_id
      ORDER BY a.name ASC`,
     (request) => request.input('reportId', sql.NVarChar(128), params.reportId)
   );
@@ -876,6 +1381,7 @@ export async function getAIAgentsForReport(params: {
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
+    clientId: row.client_id,
     publishedUrl: row.published_url,
     mcpUrl: row.mcp_url ?? undefined,
     mcpToolName: row.mcp_tool_name ?? undefined,
@@ -893,7 +1399,7 @@ export async function getAIAgentByIdForUser(params: {
   await ensureDataLayer();
 
   const agent = await queryOne<DbAIAgent>(
-    `SELECT TOP (1) id, name, published_url, mcp_url, mcp_tool_name, is_active
+    `SELECT TOP (1) id, name, client_id, published_url, mcp_url, mcp_tool_name, is_active
      FROM ai_agents
      WHERE id = @agentId AND is_active = 1`,
     (request) => request.input('agentId', sql.NVarChar(64), params.agentId)
@@ -910,12 +1416,23 @@ export async function getAIAgentByIdForUser(params: {
   if (params.reportId && !reportIds.includes(params.reportId)) return null;
 
   if (params.role !== 'admin') {
+    const user = await queryOne<{ client_id: string | null }>(
+      'SELECT TOP (1) client_id FROM users WHERE id = @userId',
+      (request) => request.input('userId', sql.NVarChar(64), params.userId)
+    );
+    const userClientId = normalizeClientId(user?.client_id);
+    if (!userClientId || userClientId !== agent.client_id) return null;
+
     if (params.reportId) {
       const allowed = await queryOne<{ allowed: number }>(
-        'SELECT TOP (1) 1 AS allowed FROM user_report_access WHERE user_id = @userId AND report_id = @reportId',
+        `SELECT TOP (1) 1 AS allowed
+         FROM user_report_access ura
+         INNER JOIN reports r ON r.id = ura.report_id
+         WHERE ura.user_id = @userId AND ura.report_id = @reportId AND r.client_id = @clientId`,
         (request) => {
           request.input('userId', sql.NVarChar(64), params.userId);
           request.input('reportId', sql.NVarChar(128), params.reportId);
+          request.input('clientId', sql.NVarChar(128), userClientId);
         }
       );
       if (!allowed) return null;
@@ -923,10 +1440,14 @@ export async function getAIAgentByIdForUser(params: {
       let hasAccess = false;
       for (const reportId of reportIds) {
         const allowed = await queryOne<{ allowed: number }>(
-          'SELECT TOP (1) 1 AS allowed FROM user_report_access WHERE user_id = @userId AND report_id = @reportId',
+          `SELECT TOP (1) 1 AS allowed
+           FROM user_report_access ura
+           INNER JOIN reports r ON r.id = ura.report_id
+           WHERE ura.user_id = @userId AND ura.report_id = @reportId AND r.client_id = @clientId`,
           (request) => {
             request.input('userId', sql.NVarChar(64), params.userId);
             request.input('reportId', sql.NVarChar(128), reportId);
+            request.input('clientId', sql.NVarChar(128), userClientId);
           }
         );
         if (allowed) {
@@ -941,6 +1462,7 @@ export async function getAIAgentByIdForUser(params: {
   return {
     id: agent.id,
     name: agent.name,
+    clientId: agent.client_id,
     publishedUrl: agent.published_url,
     mcpUrl: agent.mcp_url ?? undefined,
     mcpToolName: agent.mcp_tool_name ?? undefined,

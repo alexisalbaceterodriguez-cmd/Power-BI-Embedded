@@ -12,6 +12,7 @@ import {
 declare module 'next-auth' {
   interface User {
     role: 'admin' | 'client';
+    clientId?: string;
     reportIds: string[];
     rlsRoles?: string[];
   }
@@ -23,6 +24,7 @@ declare module 'next-auth' {
       email?: string | null;
       image?: string | null;
       role: 'admin' | 'client';
+      clientId?: string;
       reportIds: string[];
       rlsRoles?: string[];
     };
@@ -74,6 +76,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       user.name = mappedUser.name ?? user.name;
       user.email = mappedUser.email ?? user.email;
       user.role = mappedUser.role;
+      user.clientId = mappedUser.clientId;
       user.reportIds = mappedUser.reportIds;
       user.rlsRoles = mappedUser.rlsRoles;
 
@@ -86,21 +89,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async jwt({ token, user }) {
       if (user) {
-        (token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] }).id = user.id;
-        (token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] }).role = user.role;
-        (token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] }).reportIds = user.reportIds;
-        (token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] }).rlsRoles = user.rlsRoles;
+        (token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] }).id = user.id;
+        (token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] }).role = user.role;
+        (token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] }).clientId = user.clientId;
+        (token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] }).reportIds = user.reportIds;
+        (token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] }).rlsRoles = user.rlsRoles;
         token.name = user.name;
         token.email = user.email;
         return token;
       }
 
-      const enrichedToken = token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] };
+      const enrichedToken = token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] };
 
       if (enrichedToken.id) {
         const currentUser = await getSessionUserById(enrichedToken.id);
         if (currentUser) {
           enrichedToken.role = currentUser.role;
+          enrichedToken.clientId = currentUser.clientId;
           enrichedToken.reportIds = currentUser.reportIds;
           enrichedToken.rlsRoles = currentUser.rlsRoles;
           token.name = currentUser.name;
@@ -111,7 +116,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return token;
     },
     async session({ session, token }) {
-      const enrichedToken = token as typeof token & { id?: string; role?: 'admin' | 'client'; reportIds?: string[]; rlsRoles?: string[] };
+      const enrichedToken = token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] };
       if (!enrichedToken.id || !enrichedToken.role) {
         return session;
       }
@@ -124,6 +129,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.email = token.email;
       }
       session.user.role = enrichedToken.role;
+      session.user.clientId = enrichedToken.clientId;
       session.user.reportIds = enrichedToken.reportIds ?? [];
       session.user.rlsRoles = enrichedToken.rlsRoles;
       return session;

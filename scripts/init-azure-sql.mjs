@@ -47,6 +47,17 @@ const config = {
 };
 
 const schemaSql = `
+IF OBJECT_ID('dbo.clients', 'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.clients (
+    id NVARCHAR(128) NOT NULL PRIMARY KEY,
+    display_name NVARCHAR(256) NOT NULL,
+    is_active BIT NOT NULL DEFAULT 1,
+    created_at DATETIME2 NOT NULL,
+    updated_at DATETIME2 NOT NULL
+  );
+END;
+
 IF OBJECT_ID('dbo.users', 'U') IS NULL
 BEGIN
   CREATE TABLE dbo.users (
@@ -60,6 +71,11 @@ BEGIN
     created_at DATETIME2 NOT NULL,
     updated_at DATETIME2 NOT NULL
   );
+END;
+
+IF COL_LENGTH('dbo.users', 'client_id') IS NULL
+BEGIN
+  ALTER TABLE dbo.users ADD client_id NVARCHAR(128) NULL;
 END;
 
 IF OBJECT_ID('dbo.reports', 'U') IS NULL
@@ -76,6 +92,11 @@ BEGIN
     created_at DATETIME2 NOT NULL,
     updated_at DATETIME2 NOT NULL
   );
+END;
+
+IF COL_LENGTH('dbo.reports', 'client_id') IS NULL
+BEGIN
+  ALTER TABLE dbo.reports ADD client_id NVARCHAR(128) NULL;
 END;
 
 IF OBJECT_ID('dbo.user_report_access', 'U') IS NULL
@@ -115,6 +136,11 @@ BEGIN
   );
 END;
 
+IF COL_LENGTH('dbo.ai_agents', 'client_id') IS NULL
+BEGIN
+  ALTER TABLE dbo.ai_agents ADD client_id NVARCHAR(128) NULL;
+END;
+
 IF OBJECT_ID('dbo.ai_agent_reports', 'U') IS NULL
 BEGIN
   CREATE TABLE dbo.ai_agent_reports (
@@ -147,6 +173,21 @@ BEGIN
     lock_until DATETIME2 NULL,
     updated_at DATETIME2 NOT NULL
   );
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_users_client_id' AND object_id = OBJECT_ID('dbo.users'))
+BEGIN
+  CREATE INDEX IX_users_client_id ON dbo.users(client_id);
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_reports_client_id' AND object_id = OBJECT_ID('dbo.reports'))
+BEGIN
+  CREATE INDEX IX_reports_client_id ON dbo.reports(client_id);
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ai_agents_client_id' AND object_id = OBJECT_ID('dbo.ai_agents'))
+BEGIN
+  CREATE INDEX IX_ai_agents_client_id ON dbo.ai_agents(client_id);
 END;
 `;
 

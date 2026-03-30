@@ -5,6 +5,8 @@ import Image from 'next/image';
 interface PublicReport {
   id: string;
   displayName: string;
+  clientId?: string;
+  clientName?: string;
   hasAiAgents?: boolean;
   aiAgentCount?: number;
 }
@@ -12,10 +14,11 @@ interface PublicReport {
 interface SidebarProps {
   reports: PublicReport[];
   activeReportId: string | null;
+  activeClientName?: string;
   onSelectReport: (reportId: string) => void;
 }
 
-export default function Sidebar({ reports, activeReportId, onSelectReport }: SidebarProps) {
+export default function Sidebar({ reports, activeReportId, activeClientName, onSelectReport }: SidebarProps) {
   return (
     <aside className="app-sidebar" aria-label="Informes disponibles">
       <div className="sidebar-header">
@@ -23,6 +26,7 @@ export default function Sidebar({ reports, activeReportId, onSelectReport }: Sid
       </div>
 
       <p className="sidebar-section-title">Analisis de Transformacion</p>
+      {activeClientName ? <p className="sidebar-client-context">{activeClientName}</p> : null}
 
       {reports.length === 0 ? (
         <p className="sidebar-empty">No tienes activos digitales asignados a tu plataforma todavia.</p>

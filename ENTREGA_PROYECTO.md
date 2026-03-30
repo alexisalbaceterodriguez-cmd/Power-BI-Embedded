@@ -6,8 +6,8 @@ Portal de Power BI Embedded multi-workspace con seguridad reforzada y escalabili
 ## Cambios implementados
 - Migracion de identidad/autorizacion a BD SQLite + DAL server-only.
 - Panel admin basico (`/admin`) para altas de usuarios/reportes.
-- Login dual: Microsoft Entra principal + fallback local endurecido.
-- Lockout progresivo y rate limit por IP+usuario en auth local.
+- Login Microsoft-only con mapeo de usuario por email/claims Entra ID.
+- Eliminado el flujo de password local en runtime y panel de alta de usuarios.
 - API `/api/get-embed-token` con autorizacion centralizada y errores sanitizados.
 - RLS estricto (sin fallback permisivo).
 - Migracion Next.js `middleware.ts` -> `proxy.ts`.

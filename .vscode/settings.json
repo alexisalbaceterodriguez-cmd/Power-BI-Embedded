@@ -1,0 +1,5 @@
+{
+    "chat.agentSkillsLocations": {
+        "~/.copilot/skills/fabric": true
+    }
+}

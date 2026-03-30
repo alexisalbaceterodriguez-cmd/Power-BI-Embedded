@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
 
     if (roleSource && roleSource.length > 0) {
       rlsRoles = roleSource;
-      rlsUsername = reportConfig.adminRlsUsername ?? session.user.email ?? process.env.POWERBI_RLS_ADMIN_USERNAME ?? undefined;
+      rlsUsername = reportConfig.adminRlsUsername ?? session.user.email ?? session.user.name ?? process.env.POWERBI_RLS_ADMIN_USERNAME ?? undefined;
     }
   } else if (reportRlsRoles && reportRlsRoles.length > 0) {
     const userRlsRoles = session.user.rlsRoles ?? [];

@@ -11,5 +11,13 @@ export async function GET() {
   }
 
   const reports = await getAccessibleReportsForUser(session.user.id, session.user.role);
-  return NextResponse.json({ reports }, { status: 200 });
+  return NextResponse.json(
+    { reports },
+    {
+      status: 200,
+      headers: {
+        'Cache-Control': 'private, max-age=30, stale-while-revalidate=120',
+      },
+    }
+  );
 }

@@ -5,10 +5,11 @@ import { signOut, useSession } from 'next-auth/react';
 interface HeaderProps {
   showAiLauncher?: boolean;
   aiAgentCount?: number;
+  clientName?: string;
   onOpenAi?: () => void;
 }
 
-export default function Header({ showAiLauncher = false, aiAgentCount = 0, onOpenAi }: HeaderProps) {
+export default function Header({ showAiLauncher = false, aiAgentCount = 0, clientName, onOpenAi }: HeaderProps) {
   const { data: session } = useSession();
   const username = session?.user?.name ?? 'Usuario';
   const role = session?.user?.role ?? 'client';
@@ -38,9 +39,12 @@ export default function Header({ showAiLauncher = false, aiAgentCount = 0, onOpe
 
       {/* User info & logout */}
       <div className="header-user">
-        <div className="header-badge">
-          <div className="header-avatar" aria-hidden="true">{initials}</div>
-          <span className="header-username">{username}</span>
+        <div className="header-identity">
+          {clientName ? <span className="header-client-chip">{clientName}</span> : null}
+          <div className="header-badge">
+            <div className="header-avatar" aria-hidden="true">{initials}</div>
+            <span className="header-username">{username}</span>
+          </div>
         </div>
         <span className={`header-role ${role === 'admin' ? 'admin' : ''}`}>
           {role === 'admin' ? 'Admin' : 'Transformation Client'}

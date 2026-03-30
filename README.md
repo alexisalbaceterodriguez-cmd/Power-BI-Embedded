@@ -4,7 +4,7 @@ Aplicacion Next.js 16 para embebido Power BI (App Owns Data) con:
 
 - Microsoft Entra ID como autenticacion principal.
 - Autenticacion Microsoft-only (sin credenciales locales).
-- Autorizacion y asignaciones en SQLite (DAL server-only).
+- Autorizacion y asignaciones en Azure SQL (DAL server-only).
 - Panel admin basico en `/admin` para alta de usuarios/reportes.
 - API protegida de embed token con errores sanitizados.
 
@@ -30,8 +30,10 @@ AUTH_MICROSOFT_ENTRA_ID_ID="..."
 AUTH_MICROSOFT_ENTRA_ID_SECRET="..."
 AUTH_MICROSOFT_ENTRA_ID_ISSUER="https://login.microsoftonline.com/<tenant>/v2.0"
 
-# Data Layer
-APP_DB_PATH="./data/security.db"
+# Azure SQL (requerido)
+AZURE_SQL_SERVER="<server>.database.windows.net"
+AZURE_SQL_DATABASE="powerbiembedded"
+AZURE_SQL_AUTH_MODE="azure-default"
 
 # Bootstrap inicial (opcional, sin passwords)
 BOOTSTRAP_REPORTS_JSON='[{"id":"finance","displayName":"Finance","workspaceId":"...","reportId":"...","rlsRoles":["Empresa 01"]}]'
@@ -88,5 +90,4 @@ Si quieres trabajar en local contra una base Azure SQL:
 Notas:
 
 - El script admite `AZURE_SQL_AUTH_MODE=azure-default` (recomendado para local con Entra) o `sql` (usuario/password SQL).
-- El runtime usa Azure SQL automaticamente cuando `AZURE_SQL_SERVER` y `AZURE_SQL_DATABASE` estan definidos.
-- Si no defines esas variables, el runtime usa SQLite (`APP_DB_PATH`) como fallback.
+- El runtime es Azure SQL-only y requiere `AZURE_SQL_SERVER` + `AZURE_SQL_DATABASE`.

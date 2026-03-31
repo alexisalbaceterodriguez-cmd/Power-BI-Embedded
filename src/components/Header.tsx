@@ -14,6 +14,7 @@ export default function Header({ showAiLauncher = false, aiAgentCount = 0, clien
   const username = session?.user?.name ?? 'Usuario';
   const role = session?.user?.role ?? 'client';
   const initials = username.slice(0, 2).toUpperCase();
+  const clientLabel = clientName?.trim() || 'Cliente no asignado';
 
   return (
     <header className="app-header">
@@ -36,18 +37,14 @@ export default function Header({ showAiLauncher = false, aiAgentCount = 0, clien
           <div className="header-ai-placeholder" />
         )}
       </div>
-
       {/* User info & logout */}
       <div className="header-user">
-        <div className="header-identity">
-          {clientName ? <span className="header-client-chip">{clientName}</span> : null}
-          <div className="header-badge">
-            <div className="header-avatar" aria-hidden="true">{initials}</div>
-            <span className="header-username">{username}</span>
-          </div>
+        <div className="header-badge">
+          <div className="header-avatar" aria-hidden="true">{initials}</div>
+          <span className="header-username">{username}</span>
         </div>
         <span className={`header-role ${role === 'admin' ? 'admin' : ''}`}>
-          {role === 'admin' ? 'Admin' : 'Transformation Client'}
+          {clientLabel}
         </span>
         <button
           id="logout-btn"

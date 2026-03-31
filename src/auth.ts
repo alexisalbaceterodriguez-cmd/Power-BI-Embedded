@@ -9,6 +9,18 @@ import {
   recordAuditEvent,
 } from '@/lib/dal';
 
+async function safeAuditEvent(params: {
+  eventType: string;
+  userId?: string;
+  detail?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    await recordAuditEvent(params);
+  } catch {
+    // Auth flow must keep working even if audit persistence fails.
+  }
+}
+
 declare module 'next-auth' {
   interface User {
     role: 'admin' | 'client';
@@ -63,9 +75,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       if (claimCandidates.length === 0) return false;
 
-      const mappedUser = await findUserByMicrosoftClaims(claimCandidates);
+      let mappedUser = null;
+      try {
+        mappedUser = await findUserByMicrosoftClaims(claimCandidates);
+      } catch {
+        return false;
+      }
+
       if (!mappedUser) {
-        await recordAuditEvent({
+        await safeAuditEvent({
           eventType: 'auth.microsoft.denied',
           detail: { claimCandidates },
         });
@@ -80,7 +98,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       user.reportIds = mappedUser.reportIds;
       user.rlsRoles = mappedUser.rlsRoles;
 
-      await recordAuditEvent({
+      await safeAuditEvent({
         eventType: 'auth.microsoft.success',
         userId: mappedUser.id,
         detail: { claimCandidates },
@@ -102,14 +120,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       const enrichedToken = token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] };
 
       if (enrichedToken.id) {
-        const currentUser = await getSessionUserById(enrichedToken.id);
-        if (currentUser) {
-          enrichedToken.role = currentUser.role;
-          enrichedToken.clientId = currentUser.clientId;
-          enrichedToken.reportIds = currentUser.reportIds;
-          enrichedToken.rlsRoles = currentUser.rlsRoles;
-          token.name = currentUser.name;
-          token.email = currentUser.email;
+        try {
+          const currentUser = await getSessionUserById(enrichedToken.id);
+          if (currentUser) {
+            enrichedToken.role = currentUser.role;
+            enrichedToken.clientId = currentUser.clientId;
+            enrichedToken.reportIds = currentUser.reportIds;
+            enrichedToken.rlsRoles = currentUser.rlsRoles;
+            token.name = currentUser.name;
+            token.email = currentUser.email;
+          }
+        } catch {
+          // Keep existing token values to avoid breaking /api/auth/session JSON response.
         }
       }
 

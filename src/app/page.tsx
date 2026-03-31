@@ -220,13 +220,6 @@ export default function Home() {
           </div>
         ) : activeReportId ? (
           <>
-            <section className="report-context-strip" aria-live="polite">
-              <div>
-                <p className="report-context-eyebrow">Cliente activo</p>
-                <strong className="report-context-client">{activeClientLabel}</strong>
-              </div>
-              <div className="report-context-name">{activeReport?.displayName ?? activeReportId}</div>
-            </section>
             {agentsError ? (
               <div style={{ marginBottom: '0.75rem', color: 'var(--status-error)', fontSize: '0.875rem' }}>
                 {agentsError}

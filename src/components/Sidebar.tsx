@@ -25,7 +25,7 @@ export default function Sidebar({ reports, activeReportId, activeClientName, onS
         <Image src="/LOGO_COLOR_POSITIVE.webp" alt="Seidor Logo" width={130} height={40} style={{ objectFit: 'contain' }} priority />
       </div>
 
-      <p className="sidebar-section-title">Analisis de Transformacion</p>
+      <p className="sidebar-section-title">Análisis de Transformación</p>
       {activeClientName ? <p className="sidebar-client-context">{activeClientName}</p> : null}
 
       {reports.length === 0 ? (

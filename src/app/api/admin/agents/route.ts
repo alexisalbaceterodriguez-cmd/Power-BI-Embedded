@@ -74,6 +74,13 @@ export async function PUT(request: NextRequest) {
       isActive?: boolean;
     };
 
+    console.log(`[DEBUG] PUT /api/admin/agents - Received payload:`, {
+      id: payload.id,
+      publishedUrl: payload.publishedUrl,
+      name: payload.name,
+      reportIds: Array.isArray(payload.reportIds) ? payload.reportIds : splitCsv(payload.reportIds),
+    });
+
     await updateAIAgentFromAdmin({
       id: payload.id?.trim() ?? '',
       name: payload.name?.trim() ?? '',

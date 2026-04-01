@@ -177,12 +177,41 @@ export default function AdminConsole() {
       setUsers(data.users ?? []);
       setReports(data.reports ?? []);
       setAgents(data.agents ?? []);
+      if (data.agents?.length) {
+        console.log('[ADMIN-LOAD] Agents reloaded from server:', 
+          (data.agents as typeof agents).map((a) => ({ id: a.id, name: a.name, url: a.publishedUrl, clients: a.clientId })).slice(0, 3));
+      }
+    
       const nextClients = (data.clients ?? []) as ClientRow[];
       setClients(nextClients);
       const defaultClient = nextClients[0]?.id ?? 'cliente-1';
       setUserForm((prev) => ({ ...prev, clientId: prev.clientId || defaultClient }));
       setReportForm((prev) => ({ ...prev, clientId: prev.clientId || defaultClient }));
-      setAgentForm((prev) => ({ ...prev, clientId: prev.clientId || defaultClient }));
+    
+      // Fix: When in edit mode, sync the form with the latest server data
+      setAgentForm((prev) => {
+        // If we're currently editing an agent, check if it was updated on the server
+        if (prev.id && agentEditingId === prev.id) {
+          const updatedAgent = (data.agents as typeof agents)?.find((a) => a.id === prev.id);
+          if (updatedAgent && updatedAgent.publishedUrl && updatedAgent.publishedUrl !== prev.publishedUrl) {
+            console.log('[ADMIN-LOAD] Edit mode sync: Updating agentForm from server', {
+              urlChange: `${prev.publishedUrl} → ${updatedAgent.publishedUrl}`,
+            });
+            return {
+              id: updatedAgent.id,
+              name: updatedAgent.name,
+              clientId: updatedAgent.clientId,
+              publishedUrl: updatedAgent.publishedUrl,
+              mcpUrl: updatedAgent.mcpUrl ?? '',
+              mcpToolName: updatedAgent.mcpToolName ?? '',
+              reportIds: updatedAgent.reportIds,
+              isActive: updatedAgent.isActive,
+            };
+          }
+        }
+        // Not in edit mode or no changes, just update client ID
+        return { ...prev, clientId: prev.clientId || defaultClient };
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error cargando panel');
     } finally {
@@ -313,6 +342,14 @@ export default function AdminConsole() {
   }
 
   function beginEditAgent(row: AgentRow) {
+    console.log('[AGENT-EDIT] Opening agent for edit:', {
+      id: row.id,
+      name: row.name,
+      publishedUrl: row.publishedUrl,
+      clientId: row.clientId,
+      reportCount: row.reportIds.length,
+    });
+    
     setAgentEditingId(row.id);
     setAgentForm({
       id: row.id,
@@ -324,6 +361,8 @@ export default function AdminConsole() {
       reportIds: row.reportIds,
       isActive: row.isActive,
     });
+    
+    console.log('[AGENT-EDIT] agentForm state updated');
     setActiveTab('agents');
   }
 
@@ -417,6 +456,11 @@ export default function AdminConsole() {
 
     setBusy(true);
     setError(null);
+    
+    // Save these values to verify after reload
+    const agentIdBeingSaved = agentEditingId;
+    const urlBeingSaved = agentForm.publishedUrl;
+    
     try {
       if (agentEditingId) {
         await callAdminApi('/api/admin/agents', 'PUT', agentForm);
@@ -424,10 +468,32 @@ export default function AdminConsole() {
         await callAdminApi('/api/admin/agents', 'POST', agentForm);
       }
 
+      console.log('[AGENT-FIX] API call succeeded, reloading data...');
       resetAgentForm();
       await loadData();
+      
+      // Verification: Check that the data persisted correctly
+      if (agentIdBeingSaved) {
+        try {
+          const verify = await fetch('/api/admin/agents');
+          const verifyData = await verify.json();
+          const savedAgent = (verifyData.agents as typeof agents)?.find((a) => a.id === agentIdBeingSaved);
+          
+          if (savedAgent?.publishedUrl && savedAgent.publishedUrl === urlBeingSaved) {
+            console.log('[AGENT-FIX] ✓ Verification passed - URL persisted correctly:', savedAgent.publishedUrl);
+          } else if (savedAgent) {
+            console.error('[AGENT-FIX] ✗ URL mismatch detected!', {
+              sent: urlBeingSaved,
+              saved: savedAgent.publishedUrl || '(empty)',
+            });
+          }
+        } catch (verifyErr) {
+          console.warn('[AGENT-FIX] Verification fetch failed:', verifyErr);
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error guardando agente IA');
+      console.error('[AGENT-SAVE] Save failed:', err);
     } finally {
       setBusy(false);
     }
@@ -688,7 +754,7 @@ export default function AdminConsole() {
                   <input className="form-input" type="datetime-local" value={userForm.expiresAt} onChange={(event) => setUserForm((prev) => ({ ...prev, expiresAt: event.target.value }))} />
                   <input className="form-input" placeholder="RLS roles (csv)" value={userForm.rlsRoles} onChange={(event) => setUserForm((prev) => ({ ...prev, rlsRoles: event.target.value }))} />
                 </div>
-                <h3>Asignacion de informes</h3>
+                <h3>Asignación de informes</h3>
                 <div className="admin-check-grid">
                   {(userForm.role === 'admin' ? sortedReports : sortedReports.filter((report) => report.clientId === userForm.clientId)).map((report) => (
                     <label key={report.id} className="admin-check-item">

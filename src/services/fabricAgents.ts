@@ -1,16 +1,32 @@
 import { PowerBIServiceError } from '@/services/powerbi';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 interface FabricTokenCache {
   token: string;
   expiresAtMs: number;
 }
 
+interface FoundryTokenCache extends FabricTokenCache {
+  source: 'sp' | 'azure-cli';
+}
+
 let fabricTokenCache: FabricTokenCache | null = null;
+let foundryTokenCache: FoundryTokenCache | null = null;
 
 function cachedFabricToken(): string | null {
   if (!fabricTokenCache) return null;
   if (Date.now() + 60_000 >= fabricTokenCache.expiresAtMs) return null;
   return fabricTokenCache.token;
+}
+
+function cachedFoundryToken(expectedSource?: 'sp' | 'azure-cli'): string | null {
+  if (!foundryTokenCache) return null;
+  if (Date.now() + 60_000 >= foundryTokenCache.expiresAtMs) return null;
+  if (expectedSource && foundryTokenCache.source !== expectedSource) return null;
+  return foundryTokenCache.token;
 }
 
 async function safeJson(response: Response): Promise<unknown> {
@@ -83,6 +99,98 @@ export async function getFabricApiToken(): Promise<string> {
   return data.access_token;
 }
 
+export async function getFoundryApiToken(): Promise<string> {
+  const authMode = process.env.FOUNDRY_AUTH_MODE?.trim().toLowerCase();
+  if (authMode === 'azure-cli' || authMode === 'azcli') {
+    const cliToken = await getFoundryApiTokenFromAzureCli();
+    if (cliToken) return cliToken;
+    throw new PowerBIServiceError(
+      'FOUNDRY_AUTH_MODE is azure-cli but Azure CLI token acquisition failed.',
+      'No se pudo autenticar con Azure CLI para Foundry. Ejecuta az login y reinicia el servidor.',
+      500
+    );
+  }
+
+  const cached = cachedFoundryToken('sp');
+  if (cached) return cached;
+
+  const tenantId = readAzureEnv('AZURE_TENANT_ID', 'TENANT_ID');
+  const clientId = readAzureEnv('AZURE_CLIENT_ID', 'CLIENT_ID');
+  const clientSecret = readAzureEnv('AZURE_CLIENT_SECRET', 'CLIENT_SECRET');
+  const scope = process.env.FOUNDRY_API_SCOPE ?? 'https://ai.azure.com/.default';
+
+  if (!tenantId || !clientId || !clientSecret) {
+    throw new PowerBIServiceError('Missing tenant/client credentials for Foundry.', 'Foundry agent service is not configured.', 500);
+  }
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    grant_type: 'client_credentials',
+    scope,
+  });
+
+  const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    const payload = await safeJson(response);
+    throw new PowerBIServiceError(
+      `Foundry token request failed (${response.status}): ${JSON.stringify(payload)}`,
+      'Authentication with Foundry failed.',
+      502
+    );
+  }
+
+  const data = (await response.json()) as { access_token?: string; expires_in?: number };
+  if (!data.access_token) {
+    throw new PowerBIServiceError('Foundry token missing.', 'Authentication with Foundry failed.', 502);
+  }
+
+  foundryTokenCache = {
+    token: data.access_token,
+    source: 'sp',
+    expiresAtMs: Date.now() + (data.expires_in ?? 3600) * 1000,
+  };
+
+  return data.access_token;
+}
+
+async function getFoundryApiTokenFromAzureCli(): Promise<string | null> {
+  const cached = cachedFoundryToken('azure-cli');
+  if (cached) return cached;
+
+  try {
+    const isWindows = process.platform === 'win32';
+    const command = isWindows ? 'cmd.exe' : 'az';
+    const commandArgs = isWindows
+      ? ['/d', '/s', '/c', 'az account get-access-token --resource https://ai.azure.com -o json']
+      : ['account', 'get-access-token', '--resource', 'https://ai.azure.com', '-o', 'json'];
+
+    const { stdout } = await execFileAsync(command, commandArgs, { timeout: 20_000 });
+
+    const parsed = JSON.parse(stdout || '{}') as { accessToken?: string; expiresOn?: string };
+    if (!parsed.accessToken) {
+      return null;
+    }
+
+    const expiresAtMs = parsed.expiresOn ? Date.parse(parsed.expiresOn) : Date.now() + 45 * 60_000;
+    foundryTokenCache = {
+      token: parsed.accessToken,
+      source: 'azure-cli',
+      expiresAtMs: Number.isNaN(expiresAtMs) ? Date.now() + 45 * 60_000 : expiresAtMs,
+    };
+
+    return parsed.accessToken;
+  } catch {
+    return null;
+  }
+}
+
 function extractAssistantText(payload: unknown): string {
   const record = payload as Record<string, unknown>;
 
@@ -91,16 +199,16 @@ function extractAssistantText(payload: unknown): string {
   if (firstChoice) {
     const msg = firstChoice.message as Record<string, unknown> | undefined;
     if (msg && typeof msg.content === 'string' && msg.content.trim()) {
-      return msg.content;
+      return sanitizeAssistantText(msg.content);
     }
 
     if (typeof firstChoice.text === 'string' && firstChoice.text.trim()) {
-      return firstChoice.text;
+      return sanitizeAssistantText(firstChoice.text);
     }
   }
 
   if (typeof record.output_text === 'string' && record.output_text.trim()) {
-    return record.output_text;
+    return sanitizeAssistantText(record.output_text);
   }
 
   const output = Array.isArray(record.output) ? record.output as Array<Record<string, unknown>> : [];
@@ -108,12 +216,108 @@ function extractAssistantText(payload: unknown): string {
     const content = Array.isArray(item.content) ? item.content as Array<Record<string, unknown>> : [];
     for (const fragment of content) {
       if (typeof fragment.text === 'string' && fragment.text.trim()) {
-        return fragment.text;
+        return sanitizeAssistantText(fragment.text);
       }
     }
   }
 
   return 'No se recibio respuesta del agente.';
+}
+
+function sanitizeAssistantText(text: string): string {
+  return text
+    .replace(/【\d+:\d+†source】/g, '')
+    .replace(/\[\d+:\d+†source\]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function extractAssistantTextFromRaw(rawBody: string): string {
+  if (!rawBody.trim()) return '';
+
+  try {
+    const payload = JSON.parse(rawBody) as Record<string, unknown>;
+    if (typeof payload.output_text === 'string' && payload.output_text.trim()) {
+      return sanitizeAssistantText(payload.output_text);
+    }
+
+    const output = Array.isArray(payload.output) ? payload.output as Array<Record<string, unknown>> : [];
+    const messageItem = output.find((item) => item.type === 'message');
+    if (messageItem) {
+      const content = Array.isArray(messageItem.content) ? messageItem.content as Array<Record<string, unknown>> : [];
+      const first = content[0];
+      if (first && typeof first.text === 'string' && first.text.trim()) {
+        return sanitizeAssistantText(first.text);
+      }
+    }
+
+    const fallback = extractAssistantText(payload);
+    if (fallback && fallback !== 'No se recibio respuesta del agente.') {
+      return sanitizeAssistantText(fallback);
+    }
+  } catch {
+    // Raw body isn't JSON; fallback to text directly.
+  }
+
+  return sanitizeAssistantText(rawBody.trim());
+}
+
+function isFoundryPublishedResponsesEndpoint(url: string): boolean {
+  const normalized = url.trim().toLowerCase();
+  return normalized.includes('.services.ai.azure.com/') && normalized.includes('/protocols/openai/responses');
+}
+
+function resolveFoundryResponsesEndpoint(agentPublishedUrl: string): string | null {
+  const fromEnv = process.env.FOUNDRY_RESPONSES_ENDPOINT?.trim() || process.env.AZURE_FOUNDRY_RESPONSES_ENDPOINT?.trim();
+  if (fromEnv) return fromEnv;
+  if (isFoundryPublishedResponsesEndpoint(agentPublishedUrl)) return agentPublishedUrl.trim();
+  return null;
+}
+
+function inferFoundryPublicMessageByStatus(status: number): string {
+  if (status === 400) return 'El endpoint de Foundry rechazo el formato de la consulta.';
+  if (status === 401 || status === 403) return 'Foundry rechazo la autenticacion/permisos para este agente.';
+  if (status === 404) return 'No se encontro el endpoint publicado de Foundry.';
+  if (status === 429) return 'El agente de Foundry esta saturado temporalmente. Reintenta en unos segundos.';
+  if (status >= 500) return 'El servicio de Foundry no esta disponible temporalmente.';
+  return 'No fue posible consultar el agente de Foundry en este momento.';
+}
+
+async function chatWithFoundryPublishedResponses(params: {
+  responsesEndpoint: string;
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+}): Promise<string> {
+  const userMessage = latestUserQuestion(params.messages);
+  if (!userMessage) {
+    throw new PowerBIServiceError(
+      'Foundry responses call skipped: missing user message.',
+      'No se pudo construir la pregunta para el agente IA.',
+      400
+    );
+  }
+
+  const token = await getFoundryApiToken();
+  const response = await fetch(params.responsesEndpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ input: userMessage }),
+    cache: 'no-store',
+  });
+
+  const rawBody = (await safeText(response)) ?? '';
+  if (!response.ok) {
+    throw new PowerBIServiceError(
+      `Foundry responses failed (${response.status}) on ${params.responsesEndpoint}: ${rawBody}`,
+      inferFoundryPublicMessageByStatus(response.status),
+      502
+    );
+  }
+
+  const text = extractAssistantTextFromRaw(rawBody);
+  return sanitizeAssistantText(text || 'No se recibio respuesta del agente.');
 }
 
 function buildTargetUrls(baseUrl: string): string[] {
@@ -141,6 +345,14 @@ export async function chatWithFabricAgent(params: {
   mcpToolName?: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
 }): Promise<string> {
+  const foundryResponsesEndpoint = resolveFoundryResponsesEndpoint(params.publishedUrl);
+  if (foundryResponsesEndpoint) {
+    return chatWithFoundryPublishedResponses({
+      responsesEndpoint: foundryResponsesEndpoint,
+      messages: params.messages,
+    });
+  }
+
   const token = await getFabricApiToken();
   const urls = buildTargetUrls(params.publishedUrl);
   const mcpFallbackEnabled = process.env.FABRIC_ENABLE_MCP_FALLBACK !== 'false';
@@ -301,18 +513,18 @@ function extractMcpText(payload: unknown): string | null {
   const result = (record.result ?? {}) as Record<string, unknown>;
 
   if (typeof result.text === 'string' && result.text.trim()) {
-    return result.text;
+    return sanitizeAssistantText(result.text);
   }
 
   const content = Array.isArray(result.content) ? result.content as Array<Record<string, unknown>> : [];
   for (const fragment of content) {
     if (typeof fragment.text === 'string' && fragment.text.trim()) {
-      return fragment.text;
+      return sanitizeAssistantText(fragment.text);
     }
   }
 
   if (typeof result.value === 'string' && result.value.trim()) {
-    return result.value;
+    return sanitizeAssistantText(result.value);
   }
 
   return null;

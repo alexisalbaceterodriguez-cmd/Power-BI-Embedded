@@ -9,7 +9,10 @@
     "lint": "eslint",
     "fabric:health": "node --env-file=.env.local scripts/fabric-health-check.mjs",
     "db:azure:init": "node --env-file=.env.local scripts/init-azure-sql.mjs",
-    "db:azure:seed": "node --env-file=.env.local scripts/seed-azure-sql.mjs"
+    "db:azure:seed": "node --env-file=.env.local scripts/seed-azure-sql.mjs",
+    "foundry:py:install": "python -m pip install -r requirements-foundry.txt",
+    "foundry:py:invoke": "python scripts/invoke_foundry_agent.py --env-file .env.local",
+    "foundry:py:invoke:verbose": "python scripts/invoke_foundry_agent.py --env-file .env.local --verbose"
   },
   "dependencies": {
     "mssql": "^11.0.1",

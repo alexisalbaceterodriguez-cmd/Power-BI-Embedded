@@ -23,8 +23,9 @@ interface PublicReport {
 interface AgentSummary {
   id: string;
   name: string;
-  mcpUrl?: string;
-  mcpToolName?: string;
+  responsesEndpoint: string;
+  securityMode: 'none' | 'rls-inherit';
+  migrationStatus: 'migrated' | 'legacy' | 'manual';
   reportIds: string[];
 }
 
@@ -142,14 +143,14 @@ export default function Home() {
         });
         const data = await response.json();
         if (!response.ok) {
-          throw new Error(data.error ?? 'No se pudieron cargar los agentes IA');
+          throw new Error(data.error ?? 'No se pudieron cargar los agentes de datos');
         }
         if (cancelled) return;
         setAgents(Array.isArray(data.agents) ? (data.agents as AgentSummary[]) : []);
       } catch (error) {
         if (cancelled) return;
         setAgents([]);
-        setAgentsError(error instanceof Error ? error.message : 'No se pudieron cargar los agentes IA');
+        setAgentsError(error instanceof Error ? error.message : 'No se pudieron cargar los agentes de datos');
       }
     }
 
@@ -184,7 +185,6 @@ export default function Home() {
     <div className="app-shell">
       <Header
         showAiLauncher={showAiLauncher}
-        aiAgentCount={agents.length}
         clientName={activeClientLabel}
         onOpenAi={handleOpenAi}
       />

@@ -5,8 +5,9 @@ import { useEffect, useMemo, useState } from 'react';
 interface AgentSummary {
   id: string;
   name: string;
-  mcpUrl?: string;
-  mcpToolName?: string;
+  responsesEndpoint: string;
+  securityMode: 'none' | 'rls-inherit';
+  migrationStatus: 'migrated' | 'legacy' | 'manual';
   reportIds: string[];
 }
 
@@ -23,21 +24,15 @@ interface AIAgentDrawerProps {
 }
 
 export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAgentDrawerProps) {
-  const [selectedAgentId, setSelectedAgentId] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const selectedAgent = useMemo(
-    () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
-    [agents, selectedAgentId]
-  );
+  const selectedAgent = useMemo(() => agents[0] ?? null, [agents]);
 
   useEffect(() => {
     if (!open) return;
-    const first = agents[0];
-    setSelectedAgentId(first?.id ?? '');
     setMessages([]);
     setInput('');
     setError(null);
@@ -45,7 +40,7 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
 
   async function sendMessage() {
     const text = input.trim();
-    if (!text || !selectedAgentId || sending) return;
+    if (!text || !selectedAgent || sending) return;
 
     const nextUserMessage: ChatMessage = { role: 'user', content: text };
     const conversation = [...messages, nextUserMessage];
@@ -61,24 +56,24 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           reportId,
-          agentId: selectedAgentId,
+          agentId: selectedAgent.id,
           messages: conversation,
         }),
       });
 
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error ?? 'No fue posible consultar el agente IA');
+        throw new Error(data.error ?? 'No fue posible consultar el agente');
       }
 
       const assistant = data.message as ChatMessage | undefined;
       if (!assistant || assistant.role !== 'assistant') {
-        throw new Error('Respuesta invalida del agente IA');
+        throw new Error('Respuesta invalida del agente');
       }
 
       setMessages((prev) => [...prev, assistant]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error consultando el agente IA');
+      setError(err instanceof Error ? err.message : 'Error consultando el agente');
     } finally {
       setSending(false);
     }
@@ -87,11 +82,11 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
   if (!open) return null;
 
   return (
-    <aside className="ai-drawer" aria-label="Panel de agente IA">
+    <aside className="ai-drawer" aria-label="Panel de agente">
       <div className="ai-drawer-header">
         <div>
-          <p className="ai-drawer-eyebrow">Fabric AI Agent</p>
-          <h3 className="ai-drawer-title">Chat con datos del informe</h3>
+          <p className="ai-drawer-eyebrow">Agente</p>
+          <h3 className="ai-drawer-title">Asistente del informe</h3>
         </div>
         <button className="logout-btn" onClick={onClose}>
           Cerrar
@@ -99,28 +94,9 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
       </div>
 
       {agents.length === 0 ? (
-        <div className="ai-drawer-empty">No hay agentes IA disponibles para este informe.</div>
+        <div className="ai-drawer-empty">No hay agentes disponibles para este informe.</div>
       ) : (
         <>
-          <div className="ai-agent-select-wrap">
-            <label htmlFor="ai-agent-select" className="form-label">Agente IA</label>
-            <select
-              id="ai-agent-select"
-              className="form-input"
-              value={selectedAgentId}
-              onChange={(e) => setSelectedAgentId(e.target.value)}
-            >
-              {agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
-                  {agent.name}
-                </option>
-              ))}
-            </select>
-            {selectedAgent?.mcpUrl ? (
-              <p className="ai-agent-note">MCP configurado para este agente.</p>
-            ) : null}
-          </div>
-
           <div className="ai-messages">
             {messages.length === 0 ? (
               <div className="ai-drawer-empty">Escribe tu primera pregunta sobre el informe actual.</div>
@@ -139,12 +115,12 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
             <textarea
               className="form-input"
               rows={3}
-              placeholder="Pregunta al agente IA..."
+              placeholder="Pregunta al agente..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              disabled={sending || !selectedAgentId}
+              disabled={sending || !selectedAgent}
             />
-            <button className="login-btn" onClick={sendMessage} disabled={sending || !selectedAgentId || !input.trim()}>
+            <button className="login-btn" onClick={sendMessage} disabled={sending || !selectedAgent || !input.trim()}>
               {sending ? 'Consultando...' : 'Enviar'}
             </button>
           </div>

@@ -4,12 +4,11 @@ import { signOut, useSession } from 'next-auth/react';
 
 interface HeaderProps {
   showAiLauncher?: boolean;
-  aiAgentCount?: number;
   clientName?: string;
   onOpenAi?: () => void;
 }
 
-export default function Header({ showAiLauncher = false, aiAgentCount = 0, clientName, onOpenAi }: HeaderProps) {
+export default function Header({ showAiLauncher = false, clientName, onOpenAi }: HeaderProps) {
   const { data: session } = useSession();
   const username = session?.user?.name ?? 'Usuario';
   const role = session?.user?.role ?? 'client';
@@ -20,18 +19,11 @@ export default function Header({ showAiLauncher = false, aiAgentCount = 0, clien
     <header className="app-header">
       <div className="header-left-slot" aria-hidden={!showAiLauncher}>
         {showAiLauncher ? (
-          <button className="header-ai-btn" onClick={onOpenAi} aria-label="Abrir agente IA Fabric">
+          <button className="header-ai-btn" onClick={onOpenAi} aria-label="Abrir agente">
             <span className="header-ai-face" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none">
-                <rect x="3" y="7" width="18" height="12" rx="4" fill="#66B6FF" />
-                <circle cx="9" cy="13" r="1.4" fill="#111111" />
-                <circle cx="15" cy="13" r="1.4" fill="#111111" />
-                <path d="M9 16h6" stroke="#111111" strokeWidth="1.5" strokeLinecap="round" />
-                <path d="M12 4v3" stroke="#66B6FF" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
+              <img src="/icon-microsoft-foundry.png" alt="" className="header-ai-logo" />
             </span>
-            <span>Fabric AI</span>
-            <span className="header-ai-count">{aiAgentCount}</span>
+            <span>Agente</span>
           </button>
         ) : (
           <div className="header-ai-placeholder" />

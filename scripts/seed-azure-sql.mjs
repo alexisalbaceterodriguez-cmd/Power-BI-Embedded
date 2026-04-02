@@ -31,6 +31,25 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function normalizeBootstrapAgent(agent) {
+  const responsesEndpoint = String(agent.responsesEndpoint ?? agent.publishedUrl ?? '').trim();
+  if (!responsesEndpoint) return null;
+
+  return {
+    name: String(agent.name ?? '').trim() || 'foundry-agent',
+    clientId: String(agent.clientId ?? 'cliente-1').trim().toLowerCase(),
+    responsesEndpoint,
+    activityEndpoint: typeof agent.activityEndpoint === 'string' ? agent.activityEndpoint.trim() : '',
+    foundryProject: typeof agent.foundryProject === 'string' ? agent.foundryProject.trim() : '',
+    foundryAgentName: typeof agent.foundryAgentName === 'string' ? agent.foundryAgentName.trim() : '',
+    foundryAgentVersion: typeof agent.foundryAgentVersion === 'string' ? agent.foundryAgentVersion.trim() : '',
+    securityMode: agent.securityMode === 'rls-inherit' ? 'rls-inherit' : 'none',
+    migrationStatus: 'manual',
+    reportIds: Array.isArray(agent.reportIds) ? agent.reportIds : [],
+    isActive: agent.isActive !== false,
+  };
+}
+
 function buildConfig() {
   const authMode = getEnv('AZURE_SQL_AUTH_MODE', 'azure-default').toLowerCase();
   const server = getEnv('AZURE_SQL_SERVER');
@@ -190,22 +209,30 @@ async function run() {
   const existingAgents = (await conn.request().query('SELECT COUNT(*) AS c FROM ai_agents')).recordset[0].c;
   if (existingAgents === 0) {
     for (const agent of agents) {
+      const normalizedAgent = normalizeBootstrapAgent(agent);
+      if (!normalizedAgent) continue;
       const agentId = randomUUID();
-      const agentClientId = String(agent.clientId ?? 'cliente-1').trim().toLowerCase();
       await conn.request()
         .input('id', sql.NVarChar(64), agentId)
-        .input('name', sql.NVarChar(256), agent.name)
-        .input('client_id', sql.NVarChar(128), agentClientId)
-        .input('published_url', sql.NVarChar(1024), agent.publishedUrl)
-        .input('mcp_url', sql.NVarChar(1024), agent.mcpUrl ?? null)
-        .input('mcp_tool_name', sql.NVarChar(256), agent.mcpToolName ?? null)
-        .input('is_active', sql.Bit, agent.isActive === false ? 0 : 1)
+        .input('name', sql.NVarChar(256), normalizedAgent.name)
+        .input('client_id', sql.NVarChar(128), normalizedAgent.clientId)
+        .input('responses_endpoint', sql.NVarChar(2048), normalizedAgent.responsesEndpoint)
+        .input('activity_endpoint', sql.NVarChar(2048), normalizedAgent.activityEndpoint || null)
+        .input('foundry_project', sql.NVarChar(256), normalizedAgent.foundryProject || null)
+        .input('foundry_agent_name', sql.NVarChar(256), normalizedAgent.foundryAgentName || null)
+        .input('foundry_agent_version', sql.NVarChar(64), normalizedAgent.foundryAgentVersion || null)
+        .input('security_mode', sql.NVarChar(32), normalizedAgent.securityMode)
+        .input('migration_status', sql.NVarChar(32), normalizedAgent.migrationStatus)
+        .input('published_url', sql.NVarChar(1024), normalizedAgent.responsesEndpoint)
+        .input('mcp_url', sql.NVarChar(1024), null)
+        .input('mcp_tool_name', sql.NVarChar(256), null)
+        .input('is_active', sql.Bit, normalizedAgent.isActive === false ? 0 : 1)
         .input('created_at', sql.DateTime2, nowIso())
         .input('updated_at', sql.DateTime2, nowIso())
-        .query(`INSERT INTO ai_agents (id, name, client_id, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
-          VALUES (@id, @name, @client_id, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`);
+        .query(`INSERT INTO ai_agents (id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version, security_mode, migration_status, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
+          VALUES (@id, @name, @client_id, @responses_endpoint, @activity_endpoint, @foundry_project, @foundry_agent_name, @foundry_agent_version, @security_mode, @migration_status, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`);
 
-      for (const reportId of agent.reportIds ?? []) {
+      for (const reportId of normalizedAgent.reportIds ?? []) {
         await conn.request()
           .input('agent_id', sql.NVarChar(64), agentId)
           .input('report_id', sql.NVarChar(128), reportId)

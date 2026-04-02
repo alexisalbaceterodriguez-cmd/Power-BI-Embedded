@@ -25,8 +25,9 @@ export async function GET(request: NextRequest) {
     agents: agents.map((agent) => ({
       id: agent.id,
       name: agent.name,
-      mcpUrl: agent.mcpUrl,
-      mcpToolName: agent.mcpToolName,
+      responsesEndpoint: agent.responsesEndpoint,
+      securityMode: agent.securityMode,
+      migrationStatus: agent.migrationStatus,
       reportIds: agent.reportIds,
     })),
   }, { status: 200 });

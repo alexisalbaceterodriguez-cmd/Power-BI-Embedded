@@ -46,12 +46,12 @@ declare module 'next-auth' {
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     MicrosoftEntraId({
-      clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID ?? process.env.AZURE_CLIENT_ID ?? process.env.CLIENT_ID,
-      clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET ?? process.env.AZURE_CLIENT_SECRET ?? process.env.CLIENT_SECRET,
+      clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID ?? process.env.AZURE_CLIENT_ID,
+      clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET ?? process.env.AZURE_CLIENT_SECRET,
       issuer:
         process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER ??
-        (process.env.AZURE_TENANT_ID || process.env.TENANT_ID
-          ? `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID ?? process.env.TENANT_ID}/v2.0`
+        (process.env.AZURE_TENANT_ID
+          ? `https://login.microsoftonline.com/${process.env.AZURE_TENANT_ID}/v2.0`
           : undefined),
       authorization: {
         params: {

@@ -1,207 +1,100 @@
-# Manual Operativo de Usuarios, Permisos y RLS
+# Manual Operativo (Foundry-Only)
 
-Este manual explica, paso a paso, como administrar el portal:
+Este manual describe la operacion de usuarios, reportes y agentes Azure AI Foundry.
 
-1. Crear usuarios.
-2. Borrar usuarios.
-3. Dar o quitar permisos de informes.
-4. Configurar RLS.
-5. Resolver incidencias frecuentes.
+## 1) Alcance
 
-La fuente de verdad es la base SQLite definida en `APP_DB_PATH` (por defecto `./data/security.db`).
+1. Gestion de usuarios y permisos de reportes.
+2. Configuracion RLS por usuario.
+3. Alta y mantenimiento de agentes IA Foundry.
+4. Troubleshooting y validaciones de produccion.
 
----
+Fuente de verdad: Azure SQL.
 
-## 1) Requisitos previos
+## 2) Requisitos previos
 
-1. Arranca la aplicacion:
-   - `npm run dev`
-2. Entra con un usuario `admin`.
-3. Abre el panel de administracion:
-   - `http://localhost:3000/admin`
+1. Aplicacion desplegada o en local (`npm run dev`).
+2. Login con usuario `admin`.
+3. Endpoint admin disponible en `/admin`.
 
-Tablas principales de seguridad:
+Tablas clave:
+
 - `users`
 - `reports`
 - `user_report_access`
 - `user_rls_roles`
+- `ai_agents`
+- `ai_agent_reports`
 - `audit_log`
 
----
+## 3) Gestion de usuarios
 
-## 2) Crear un usuario (metodo recomendado: panel /admin)
+En `/admin` > pestaña `Usuarios`:
 
-En `/admin`, bloque **Alta de usuario Microsoft**:
+1. Crear usuario con `username`, `email`, `role` y `cliente`.
+2. Asignar reportes autorizados.
+3. Definir `RLS roles` (csv) cuando aplique.
+4. Activar o desactivar usuario.
 
-1. `username`: nombre de usuario (ej. `cliente_finance`).
-2. `email`: correo del usuario (obligatorio si usara Microsoft Entra ID).
-3. `role`: `client` o `admin`.
-4. No se usa password local. El acceso se valida solo con Microsoft Entra ID.
-5. `reportIds (csv)`: IDs internos de informes, separados por coma.
-   - Ejemplo: `finance-controlling,informe-webinar`
-6. `rlsRoles (csv)`: roles RLS permitidos para ese usuario.
-   - Ejemplo: `Empresa 01,Permisos`
-7. Pulsa **Crear usuario**.
+Validaciones:
 
-Comprobacion:
-1. Debe aparecer en el bloque **Usuarios**.
-2. El usuario ya puede iniciar sesion con Microsoft Entra ID.
-3. El usuario puede iniciar sesion si el `email` coincide con sus claims de Entra ID.
+- El email debe corresponder a claims de Microsoft Entra ID.
+- Usuarios `client` solo deben tener reportes de su cliente.
 
----
+## 4) Gestion de reportes
 
-## 3) Dar permisos a un usuario existente
+En `/admin` > pestaña `Informes`:
 
-Actualmente el panel crea usuarios, pero no edita permisos existentes en la UI.  
-Para cambios de permisos en usuarios ya creados, usa SQL.
+1. Definir `id`, `displayName`, `workspaceId`, `reportId`, `clientId`.
+2. Configurar `rlsRoles` y `adminRlsRoles` cuando corresponda.
+3. Activar/desactivar reporte.
 
-### 3.1 Dar acceso a un informe
+## 5) Gestion de agentes Foundry
 
-```sql
-INSERT OR IGNORE INTO user_report_access (user_id, report_id, created_at)
-VALUES ('ID_USUARIO', 'ID_REPORTE', datetime('now'));
-```
+En `/admin` > pestaña `Agentes IA`:
 
-### 3.2 Quitar acceso a un informe
+Campos del agente:
 
-```sql
-DELETE FROM user_report_access
-WHERE user_id = 'ID_USUARIO' AND report_id = 'ID_REPORTE';
-```
+1. `Nombre`.
+2. `Cliente`.
+3. `Responses Endpoint` de la aplicación publicada en Foundry.
+4. `Activity Endpoint` (opcional).
+5. `Proyecto Foundry` (opcional).
+6. `Nombre de agente Foundry` (opcional).
+7. `Version de agente` (opcional).
+8. `Modo de seguridad`:
+   - `Sin RLS`
+   - `RLS heredado del usuario`
+9. `Informes vinculados`.
 
-### 3.3 Ver permisos actuales
+Nota:
 
-```sql
-SELECT u.username, ura.report_id
-FROM user_report_access ura
-JOIN users u ON u.id = ura.user_id
-ORDER BY u.username, ura.report_id;
-```
+- En esta release, columnas legacy de Fabric quedan deprecadas en BD para compatibilidad temporal, pero no se usan en UI ni runtime.
 
----
+## 6) Flujos de validacion
 
-## 4) Configurar RLS por usuario
+1. Verificar schema y migracion:
+   - `npm run db:azure:init`
+2. Seed inicial (solo entorno limpio):
+   - `npm run db:azure:seed`
+3. Validar salud de Foundry:
+   - `npm run foundry:health`
+4. Build de regresion:
+   - `npm run build`
 
-Regla actual del sistema:
-- Si el informe tiene RLS, el usuario debe tener interseccion entre sus roles y los del informe.
-- Si no hay interseccion, devuelve `403`.
+## 7) Troubleshooting rapido
 
-### 4.1 Asignar roles RLS al usuario
+1. `401/403` en chat Foundry:
+   - Revisar `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`.
+   - Revisar RBAC en recurso/proyecto Foundry.
+2. Usuario no ve informes:
+   - Revisar `user_report_access`, cliente y estado activo.
+3. Error de datos con RLS:
+   - Revisar `user_rls_roles` y modo de seguridad del agente.
 
-```sql
-INSERT OR IGNORE INTO user_rls_roles (user_id, role_name, created_at)
-VALUES ('ID_USUARIO', 'Empresa 01', datetime('now'));
-```
+## 8) Seguridad operativa
 
-### 4.2 Quitar un rol RLS al usuario
-
-```sql
-DELETE FROM user_rls_roles
-WHERE user_id = 'ID_USUARIO' AND role_name = 'Empresa 01';
-```
-
-### 4.3 Ver roles RLS actuales por usuario
-
-```sql
-SELECT u.username, urr.role_name
-FROM user_rls_roles urr
-JOIN users u ON u.id = urr.user_id
-ORDER BY u.username, urr.role_name;
-```
-
----
-
-## 5) Borrar un usuario
-
-Al borrar en `users`, se eliminan automaticamente permisos y roles RLS asociados por `ON DELETE CASCADE`.
-
-```sql
-DELETE FROM users
-WHERE id = 'ID_USUARIO';
-```
-
-Recomendacion: nunca borres el unico admin.
-
-Consulta previa sugerida:
-
-```sql
-SELECT id, username, email, role, is_active
-FROM users
-ORDER BY username;
-```
-
----
-
-## 6) Crear o borrar informes
-
-### 6.1 Crear informe (UI)
-
-En `/admin`, bloque **Alta de reporte**:
-1. `id`: identificador interno (ej. `informe-webinar`).
-2. `displayName`: nombre visible.
-3. `workspaceId`: GUID del workspace Power BI.
-4. `reportId`: GUID del informe Power BI.
-5. `rlsRoles (csv)`: roles permitidos en ese informe.
-6. `adminRlsRoles (csv)` y `adminRlsUsername` (opcionales).
-7. Pulsa **Crear reporte**.
-
-### 6.2 Borrar informe (SQL)
-
-```sql
-DELETE FROM reports
-WHERE id = 'ID_REPORTE';
-```
-
-Esto elimina tambien accesos asociados en `user_report_access`.
-
----
-
-## 7) Gestion de cuentas Microsoft Entra ID
-
-Para login Microsoft, el usuario de BD debe tener `email` que coincida con alguno de estos claims de Entra:
-- `email`
-- `preferred_username`
-- `upn`
-- `unique_name`
-
-Si un usuario Microsoft recibe `AccessDenied`:
-1. Comprueba que existe en `users`.
-2. Comprueba que `email` en BD coincide exactamente con su cuenta Entra.
-3. Verifica que `is_active = 1`.
-
----
-
-## 8) Operativa recomendada (flujo diario)
-
-1. Crear informe nuevo (si aplica).
-2. Crear usuario.
-3. Asignar `reportIds`.
-4. Asignar `rlsRoles`.
-5. Probar login con ese usuario.
-6. Revisar `audit_log` si hay incidencias.
-
----
-
-## 9) Troubleshooting rapido
-
-### 9.1 `Forbidden` al cargar informe
-- El usuario no tiene permiso en `user_report_access`, o
-- No tiene interseccion de `rlsRoles` con el informe.
-
-### 9.2 Usuario entra pero no ve informes
-- No tiene filas en `user_report_access`, o
-- Los informes estan inactivos.
-
-### 9.3 Login Microsoft no deja cambiar cuenta
-- El sistema ya fuerza selector de cuenta (`prompt=select_account`).
-- Si persiste, cerrar sesion de Microsoft en el navegador y reintentar.
-
----
-
-## 10) Seguridad minima obligatoria
-
-1. Rotar secretos expuestos y no compartir `.env.local`.
-2. Cambiar `NEXTAUTH_SECRET` por uno robusto.
-3. En Azure: usar Key Vault + Managed Identity.
-4. Mantener Microsoft Entra como login principal.
-5. Revisar `audit_log` periodicamente.
+1. Guardar secretos en Key Vault.
+2. Rotar `AZURE_CLIENT_SECRET` y `NEXTAUTH_SECRET`.
+3. Activar logs y alertas sobre `audit_log` y errores de chat.
+4. Aplicar principio de minimo privilegio en roles de Azure.

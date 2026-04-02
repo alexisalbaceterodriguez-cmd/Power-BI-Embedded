@@ -28,6 +28,38 @@ function getClientIp(request: NextRequest): string | undefined {
   return request.headers.get('x-real-ip') ?? undefined;
 }
 
+function envFlagEnabled(name: string, defaultValue: boolean): boolean {
+  const rawValue = process.env[name];
+  if (!rawValue || !rawValue.trim()) return defaultValue;
+  return ['1', 'true', 'yes', 'on'].includes(rawValue.trim().toLowerCase());
+}
+
+function extractDelegatedAccessToken(request: NextRequest): string | undefined {
+  const passthroughEnabled = envFlagEnabled('FOUNDRY_ENABLE_USER_TOKEN_PASSTHROUGH', true);
+  if (!passthroughEnabled) return undefined;
+
+  const configuredHeader = process.env.FOUNDRY_USER_TOKEN_HEADER?.trim().toLowerCase();
+  const preferredHeader = configuredHeader && configuredHeader.length > 0
+    ? configuredHeader
+    : 'x-ms-token-aad-access-token';
+
+  const candidateHeaders = Array.from(new Set([preferredHeader, 'x-ms-token-aad-access-token']));
+  for (const headerName of candidateHeaders) {
+    const token = request.headers.get(headerName)?.trim();
+    if (token) return token;
+  }
+
+  const allowAuthorizationBearer = envFlagEnabled('FOUNDRY_ALLOW_AUTHORIZATION_BEARER_PASSTHROUGH', false);
+  if (!allowAuthorizationBearer) return undefined;
+
+  const authorizationHeader = request.headers.get('authorization');
+  if (!authorizationHeader) return undefined;
+
+  const bearerMatch = authorizationHeader.match(/^Bearer\s+(.+)$/i);
+  const bearerToken = bearerMatch?.[1]?.trim();
+  return bearerToken || undefined;
+}
+
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id || !session.user.role) {
@@ -198,6 +230,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const delegatedAccessToken = extractDelegatedAccessToken(request);
+
     const assistantText = await chatWithFoundryAgent({
       responsesEndpoint: agent.responsesEndpoint,
       securityMode: agent.securityMode,
@@ -205,6 +239,7 @@ export async function POST(request: NextRequest) {
       rlsRoles: effectiveRlsRoles,
       scopeCompanyIds: effectiveScopeCompanyIds,
       scopeAttributes: effectiveScopeAttributes,
+      delegatedAccessToken,
       messages,
     });
 

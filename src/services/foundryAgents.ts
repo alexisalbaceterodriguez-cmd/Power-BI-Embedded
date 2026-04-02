@@ -62,6 +62,12 @@ function sanitizeAssistantText(text: string): string {
     .trim();
 }
 
+function envFlagEnabled(name: string, defaultValue: boolean): boolean {
+  const rawValue = process.env[name];
+  if (!rawValue || !rawValue.trim()) return defaultValue;
+  return ['1', 'true', 'yes', 'on'].includes(rawValue.trim().toLowerCase());
+}
+
 function latestUserQuestion(messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>): string | null {
   const latestUser = [...messages].reverse().find((msg) => msg.role === 'user' && msg.content.trim());
   return latestUser ? latestUser.content.trim() : null;
@@ -198,6 +204,25 @@ async function getFoundryApiTokenFromAzureCli(): Promise<string | null> {
   }
 }
 
+async function invokeFoundryResponses(params: {
+  responsesEndpoint: string;
+  token: string;
+  inputText: string;
+}): Promise<{ response: Response; rawBody: string }> {
+  const response = await fetch(params.responsesEndpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${params.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ input: params.inputText }),
+    cache: 'no-store',
+  });
+
+  const rawBody = (await safeText(response)) ?? '';
+  return { response, rawBody };
+}
+
 export async function chatWithFoundryAgent(params: {
   responsesEndpoint: string;
   securityMode: 'none' | 'rls-inherit';
@@ -205,6 +230,7 @@ export async function chatWithFoundryAgent(params: {
   rlsRoles?: string[];
   scopeCompanyIds?: string[];
   scopeAttributes?: Record<string, string[]>;
+  delegatedAccessToken?: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
 }): Promise<string> {
   const userMessage = latestUserQuestion(params.messages);
@@ -216,7 +242,9 @@ export async function chatWithFoundryAgent(params: {
     );
   }
 
-  const token = await getFoundryApiToken();
+  const delegatedToken = params.delegatedAccessToken?.trim();
+  const allowDelegatedFallback = envFlagEnabled('FOUNDRY_FALLBACK_TO_APP_TOKEN_ON_DELEGATED_FAILURE', true);
+
   const hasRoles = Boolean(params.rlsRoles && params.rlsRoles.length > 0);
   const hasScopeIds = Boolean(params.scopeCompanyIds && params.scopeCompanyIds.length > 0);
   const hasScopeAttrs = hasScopeAttributes(params.scopeAttributes);
@@ -239,17 +267,24 @@ export async function chatWithFoundryAgent(params: {
       ? `[RLS ${contextParts.join(' ')}] ${userMessage}`
       : userMessage;
 
-  const response = await fetch(params.responsesEndpoint, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ input: inputText }),
-    cache: 'no-store',
+  const primaryToken = delegatedToken && delegatedToken.length > 0 ? delegatedToken : await getFoundryApiToken();
+  let { response, rawBody } = await invokeFoundryResponses({
+    responsesEndpoint: params.responsesEndpoint,
+    token: primaryToken,
+    inputText,
   });
 
-  const rawBody = (await safeText(response)) ?? '';
+  if (!response.ok && delegatedToken && allowDelegatedFallback && (response.status === 401 || response.status === 403)) {
+    const fallbackToken = await getFoundryApiToken();
+    const fallbackCall = await invokeFoundryResponses({
+      responsesEndpoint: params.responsesEndpoint,
+      token: fallbackToken,
+      inputText,
+    });
+    response = fallbackCall.response;
+    rawBody = fallbackCall.rawBody;
+  }
+
   if (!response.ok) {
     throw new PowerBIServiceError(
       `Foundry responses failed (${response.status}) on ${params.responsesEndpoint}: ${rawBody}`,

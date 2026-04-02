@@ -99,6 +99,8 @@ Validacion recomendada de alcance multidimension:
 1. `401/403` en chat Foundry:
    - Revisar `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`.
    - Revisar RBAC en recurso/proyecto Foundry.
+   - Si se usa passthrough delegado, confirmar cabecera `x-ms-token-aad-access-token` (o la definida en `FOUNDRY_USER_TOKEN_HEADER`).
+   - Si el token delegado falla y no quieres fallback a aplicacion, fijar `FOUNDRY_FALLBACK_TO_APP_TOKEN_ON_DELEGATED_FAILURE=false`.
 2. Usuario no ve informes:
    - Revisar `user_report_access`, cliente y estado activo.
 3. Error de datos con RLS:

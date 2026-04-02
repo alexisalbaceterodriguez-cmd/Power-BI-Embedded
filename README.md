@@ -13,7 +13,7 @@ Estado actual del producto:
 
 1. Autenticacion de usuarios con Microsoft Entra ID (Auth.js).
 2. Autorizacion por cliente/reporte y roles RLS desde Azure SQL.
-3. Chat IA server-side en API route interna con token de aplicacion a Foundry.
+3. Chat IA server-side en API route interna con token delegado de usuario (si llega por cabecera) y fallback a token de aplicacion.
 4. UI de chat embebida en el dashboard de reportes.
 
 ## API de chat (RLS)
@@ -60,6 +60,7 @@ Notas:
 - `scopeCompanyIds` es opcional y permite validacion de alcance sin depender de texto libre.
 - `scopeAttributes` permite enforcement de alcance por cualquier dimension (region, canal, segmento, etc.) si el rol RLS incluye esos atributos.
 - Si no se envia, el backend mantiene compatibilidad con extraccion de empresas desde texto.
+- Si la peticion incluye cabecera de token delegado (por defecto `x-ms-token-aad-access-token`), el backend la usa para llamar a Foundry; si falla con `401/403`, puede hacer fallback al token de aplicacion.
 
 ## Variables de entorno
 
@@ -88,6 +89,10 @@ AZURE_SQL_TRUST_SERVER_CERTIFICATE="false"
 # Foundry runtime
 FOUNDRY_API_SCOPE="https://ai.azure.com/.default"
 FOUNDRY_AUTH_MODE="azure-cli"
+FOUNDRY_ENABLE_USER_TOKEN_PASSTHROUGH="true"
+FOUNDRY_USER_TOKEN_HEADER="x-ms-token-aad-access-token"
+FOUNDRY_ALLOW_AUTHORIZATION_BEARER_PASSTHROUGH="false"
+FOUNDRY_FALLBACK_TO_APP_TOKEN_ON_DELEGATED_FAILURE="true"
 
 # Bootstrap opcional
 BOOTSTRAP_ADMIN_USERNAME="admin"

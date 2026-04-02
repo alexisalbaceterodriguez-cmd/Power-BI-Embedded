@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { getAIAgentByIdForUser, recordAuditEvent } from '@/lib/dal';
-import { chatWithFabricAgent } from '@/services/fabricAgents';
+import { chatWithFoundryAgent } from '@/services/foundryAgents';
 import { PowerBIServiceError } from '@/services/powerbi';
 
 export const runtime = 'nodejs';
@@ -55,10 +55,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const assistantText = await chatWithFabricAgent({
-      publishedUrl: agent.publishedUrl,
-      mcpUrl: agent.mcpUrl,
-      mcpToolName: agent.mcpToolName,
+    const assistantText = await chatWithFoundryAgent({
+      responsesEndpoint: agent.responsesEndpoint,
+      securityMode: agent.securityMode,
+      userName: session.user.email ?? session.user.name ?? session.user.id,
+      rlsRoles: session.user.rlsRoles,
       messages,
     });
 
@@ -66,7 +67,12 @@ export async function POST(request: NextRequest) {
       eventType: 'agent.chat.success',
       userId: session.user.id,
       ip,
-      detail: { agentId, reportId: payload.reportId },
+      detail: {
+        agentId,
+        reportId: payload.reportId,
+        endpoint: agent.responsesEndpoint,
+        securityMode: agent.securityMode,
+      },
     });
 
     return NextResponse.json({

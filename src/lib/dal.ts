@@ -68,9 +68,13 @@ export interface AIAgentConfig {
   id: string;
   name: string;
   clientId: string;
-  publishedUrl: string;
-  mcpUrl?: string;
-  mcpToolName?: string;
+  responsesEndpoint: string;
+  activityEndpoint?: string;
+  foundryProject?: string;
+  foundryAgentName?: string;
+  foundryAgentVersion?: string;
+  securityMode: 'none' | 'rls-inherit';
+  migrationStatus: 'migrated' | 'legacy' | 'manual';
   reportIds: string[];
   isActive: boolean;
 }
@@ -78,9 +82,13 @@ export interface AIAgentConfig {
 export interface CreateAIAgentInput {
   name: string;
   clientId: string;
-  publishedUrl: string;
-  mcpUrl?: string;
-  mcpToolName?: string;
+  responsesEndpoint: string;
+  activityEndpoint?: string;
+  foundryProject?: string;
+  foundryAgentName?: string;
+  foundryAgentVersion?: string;
+  securityMode?: 'none' | 'rls-inherit';
+  migrationStatus?: 'migrated' | 'legacy' | 'manual';
   reportIds: string[];
   isActive?: boolean;
 }

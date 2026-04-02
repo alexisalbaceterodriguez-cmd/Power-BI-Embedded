@@ -50,12 +50,8 @@ export default function Sidebar({ reports, activeReportId, activeClientName, onS
               </svg>
               <span className="sidebar-item-label">{report.displayName}</span>
               {report.hasAiAgents ? (
-                <span className="sidebar-ai-dot" title={`Agentes IA disponibles: ${report.aiAgentCount ?? 1}`} aria-label="Informe con agente IA">
-                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none">
-                    <rect x="3" y="7" width="18" height="12" rx="4" fill="#66B6FF" />
-                    <circle cx="9" cy="13" r="1.3" fill="#111111" />
-                    <circle cx="15" cy="13" r="1.3" fill="#111111" />
-                  </svg>
+                <span className="sidebar-ai-dot" title={`Agentes disponibles: ${report.aiAgentCount ?? 1}`} aria-label="Informe con agente">
+                  <img src="/icon-microsoft-foundry.png" alt="" className="sidebar-ai-logo" />
                 </span>
               ) : null}
             </button>

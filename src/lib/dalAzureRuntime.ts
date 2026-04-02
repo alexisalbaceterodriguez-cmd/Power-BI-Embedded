@@ -49,6 +49,13 @@ interface DbAIAgent {
   id: string;
   name: string;
   client_id: string;
+  responses_endpoint: string | null;
+  activity_endpoint: string | null;
+  foundry_project: string | null;
+  foundry_agent_name: string | null;
+  foundry_agent_version: string | null;
+  security_mode: 'none' | 'rls-inherit' | null;
+  migration_status: 'migrated' | 'legacy' | 'manual' | null;
   published_url: string;
   mcp_url: string | null;
   mcp_tool_name: string | null;
@@ -211,9 +218,37 @@ function getBootstrapAIAgents(): CreateAIAgentInput[] {
   const fromEnv = process.env.BOOTSTRAP_AI_AGENTS_JSON;
   if (!fromEnv) return [];
   try {
-    const parsed = JSON.parse(fromEnv) as CreateAIAgentInput[];
+    const parsed = JSON.parse(fromEnv) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed;
+    const output: CreateAIAgentInput[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== 'object') continue;
+      const entry = item as Record<string, unknown>;
+      const responsesEndpoint =
+        (typeof entry.responsesEndpoint === 'string' ? entry.responsesEndpoint : undefined) ??
+        (typeof entry.publishedUrl === 'string' ? entry.publishedUrl : undefined) ??
+        '';
+
+      if (!responsesEndpoint.trim()) continue;
+
+      output.push({
+        name: typeof entry.name === 'string' ? entry.name : 'foundry-agent',
+        clientId: typeof entry.clientId === 'string' ? entry.clientId : 'cliente-1',
+        responsesEndpoint,
+        activityEndpoint: typeof entry.activityEndpoint === 'string' ? entry.activityEndpoint : undefined,
+        foundryProject: typeof entry.foundryProject === 'string' ? entry.foundryProject : undefined,
+        foundryAgentName: typeof entry.foundryAgentName === 'string' ? entry.foundryAgentName : undefined,
+        foundryAgentVersion: typeof entry.foundryAgentVersion === 'string' ? entry.foundryAgentVersion : undefined,
+        securityMode: entry.securityMode === 'rls-inherit' ? 'rls-inherit' : 'none',
+        migrationStatus: 'manual',
+        reportIds: Array.isArray(entry.reportIds)
+          ? entry.reportIds.filter((value): value is string => typeof value === 'string')
+          : [],
+        isActive: entry.isActive !== false,
+      });
+    }
+
+    return output;
   } catch {
     return [];
   }
@@ -340,6 +375,13 @@ BEGIN
   CREATE TABLE dbo.ai_agents (
     id NVARCHAR(64) NOT NULL PRIMARY KEY,
     name NVARCHAR(256) NOT NULL,
+    responses_endpoint NVARCHAR(2048) NULL,
+    activity_endpoint NVARCHAR(2048) NULL,
+    foundry_project NVARCHAR(256) NULL,
+    foundry_agent_name NVARCHAR(256) NULL,
+    foundry_agent_version NVARCHAR(64) NULL,
+    security_mode NVARCHAR(32) NOT NULL DEFAULT 'none',
+    migration_status NVARCHAR(32) NOT NULL DEFAULT 'legacy',
     published_url NVARCHAR(1024) NOT NULL,
     mcp_url NVARCHAR(1024) NULL,
     mcp_tool_name NVARCHAR(256) NULL,
@@ -352,6 +394,41 @@ END;
 IF COL_LENGTH('dbo.ai_agents', 'client_id') IS NULL
 BEGIN
   ALTER TABLE dbo.ai_agents ADD client_id NVARCHAR(128) NULL;
+END;
+
+IF COL_LENGTH('dbo.ai_agents', 'responses_endpoint') IS NULL
+BEGIN
+  ALTER TABLE dbo.ai_agents ADD responses_endpoint NVARCHAR(2048) NULL;
+END;
+
+IF COL_LENGTH('dbo.ai_agents', 'activity_endpoint') IS NULL
+BEGIN
+  ALTER TABLE dbo.ai_agents ADD activity_endpoint NVARCHAR(2048) NULL;
+END;
+
+IF COL_LENGTH('dbo.ai_agents', 'foundry_project') IS NULL
+BEGIN
+  ALTER TABLE dbo.ai_agents ADD foundry_project NVARCHAR(256) NULL;
+END;
+
+IF COL_LENGTH('dbo.ai_agents', 'foundry_agent_name') IS NULL
+BEGIN
+  ALTER TABLE dbo.ai_agents ADD foundry_agent_name NVARCHAR(256) NULL;
+END;
+
+IF COL_LENGTH('dbo.ai_agents', 'foundry_agent_version') IS NULL
+BEGIN
+  ALTER TABLE dbo.ai_agents ADD foundry_agent_version NVARCHAR(64) NULL;
+END;
+
+IF COL_LENGTH('dbo.ai_agents', 'security_mode') IS NULL
+BEGIN
+  ALTER TABLE dbo.ai_agents ADD security_mode NVARCHAR(32) NOT NULL CONSTRAINT DF_ai_agents_security_mode DEFAULT 'none';
+END;
+
+IF COL_LENGTH('dbo.ai_agents', 'migration_status') IS NULL
+BEGIN
+  ALTER TABLE dbo.ai_agents ADD migration_status NVARCHAR(32) NOT NULL CONSTRAINT DF_ai_agents_migration_status DEFAULT 'legacy';
 END;
 
 IF OBJECT_ID('dbo.ai_agent_reports', 'U') IS NULL
@@ -401,6 +478,11 @@ END;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ai_agents_client_id' AND object_id = OBJECT_ID('dbo.ai_agents'))
 BEGIN
   CREATE INDEX IX_ai_agents_client_id ON dbo.ai_agents(client_id);
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ai_agents_migration_status' AND object_id = OBJECT_ID('dbo.ai_agents'))
+BEGIN
+  CREATE INDEX IX_ai_agents_migration_status ON dbo.ai_agents(migration_status);
 END;
 `;
 
@@ -540,6 +622,39 @@ async function backfillDefaultClientsAndAssignments(): Promise<void> {
      )
      WHERE client_id IS NULL`
   );
+
+  await queryRows(
+    `UPDATE ai_agents
+     SET responses_endpoint = COALESCE(responses_endpoint, published_url),
+         migration_status = CASE
+           WHEN migration_status IN ('migrated', 'manual') THEN migration_status
+           WHEN published_url LIKE '%services.ai.azure.com%/protocols/openai/responses%' THEN 'migrated'
+           ELSE 'legacy'
+         END,
+         security_mode = CASE
+           WHEN security_mode IN ('none', 'rls-inherit') THEN security_mode
+           ELSE 'none'
+         END
+     WHERE responses_endpoint IS NULL OR migration_status IS NULL OR security_mode IS NULL`
+  );
+
+  const forcedFoundryEndpoint =
+    process.env.AZURE_FOUNDRY_RESPONSES_ENDPOINT?.trim() ||
+    process.env.FOUNDRY_RESPONSES_ENDPOINT?.trim() ||
+    '';
+
+  if (forcedFoundryEndpoint) {
+    await queryRows(
+      `UPDATE ai_agents
+       SET responses_endpoint = @responses_endpoint,
+           published_url = @responses_endpoint,
+           migration_status = 'migrated'
+       WHERE migration_status = 'legacy'`,
+      (request) => {
+        request.input('responses_endpoint', sql.NVarChar(2048), forcedFoundryEndpoint);
+      }
+    );
+  }
 }
 
 async function seedBootstrapData(): Promise<void> {
@@ -673,15 +788,22 @@ async function seedBootstrapData(): Promise<void> {
     const agentClientId = normalizeClientId(agent.clientId) ?? 'cliente-1';
     await queryRows(
       `INSERT INTO ai_agents
-        (id, name, client_id, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
-       VALUES (@id, @name, @client_id, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`,
+        (id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version, security_mode, migration_status, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
+       VALUES (@id, @name, @client_id, @responses_endpoint, @activity_endpoint, @foundry_project, @foundry_agent_name, @foundry_agent_version, @security_mode, @migration_status, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`,
       (request) => {
         request.input('id', sql.NVarChar(64), agentId);
         request.input('name', sql.NVarChar(256), agent.name);
         request.input('client_id', sql.NVarChar(128), agentClientId);
-        request.input('published_url', sql.NVarChar(1024), agent.publishedUrl);
-        request.input('mcp_url', sql.NVarChar(1024), agent.mcpUrl ?? null);
-        request.input('mcp_tool_name', sql.NVarChar(256), agent.mcpToolName ?? null);
+        request.input('responses_endpoint', sql.NVarChar(2048), agent.responsesEndpoint.trim());
+        request.input('activity_endpoint', sql.NVarChar(2048), agent.activityEndpoint?.trim() || null);
+        request.input('foundry_project', sql.NVarChar(256), agent.foundryProject?.trim() || null);
+        request.input('foundry_agent_name', sql.NVarChar(256), agent.foundryAgentName?.trim() || null);
+        request.input('foundry_agent_version', sql.NVarChar(64), agent.foundryAgentVersion?.trim() || null);
+        request.input('security_mode', sql.NVarChar(32), agent.securityMode ?? 'none');
+        request.input('migration_status', sql.NVarChar(32), agent.migrationStatus ?? 'manual');
+        request.input('published_url', sql.NVarChar(1024), agent.responsesEndpoint.trim());
+        request.input('mcp_url', sql.NVarChar(1024), null);
+        request.input('mcp_tool_name', sql.NVarChar(256), null);
         request.input('is_active', sql.Bit, toBit(agent.isActive !== false));
         request.input('created_at', sql.DateTime2, nowIso());
         request.input('updated_at', sql.DateTime2, nowIso());
@@ -1209,7 +1331,10 @@ export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
   await ensureDataLayer();
 
   const rows = await queryRows<DbAIAgent>(
-    'SELECT id, name, client_id, published_url, mcp_url, mcp_tool_name, is_active FROM ai_agents ORDER BY name ASC'
+    `SELECT id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version,
+            security_mode, migration_status, published_url, mcp_url, mcp_tool_name, is_active
+     FROM ai_agents
+     ORDER BY name ASC`
   );
 
   const reportRows = await queryRows<{ agent_id: string; report_id: string }>(
@@ -1227,9 +1352,13 @@ export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
     id: row.id,
     name: row.name,
     clientId: row.client_id,
-    publishedUrl: row.published_url,
-    mcpUrl: row.mcp_url ?? undefined,
-    mcpToolName: row.mcp_tool_name ?? undefined,
+    responsesEndpoint: (row.responses_endpoint ?? row.published_url ?? '').trim(),
+    activityEndpoint: row.activity_endpoint ?? undefined,
+    foundryProject: row.foundry_project ?? undefined,
+    foundryAgentName: row.foundry_agent_name ?? undefined,
+    foundryAgentVersion: row.foundry_agent_version ?? undefined,
+    securityMode: row.security_mode === 'rls-inherit' ? 'rls-inherit' : 'none',
+    migrationStatus: row.migration_status === 'migrated' || row.migration_status === 'manual' ? row.migration_status : 'legacy',
     reportIds: reportMap.get(row.id) ?? [],
     isActive: toBoolean(row.is_active),
   }));
@@ -1239,22 +1368,29 @@ export async function createAIAgentFromAdmin(input: CreateAIAgentInput): Promise
   await ensureDataLayer();
   const clientId = await ensureClientExists(input.clientId);
   if (!input.name.trim()) throw new Error('Agent name is required.');
-  if (!input.publishedUrl.trim()) throw new Error('Published URL is required.');
+  if (!input.responsesEndpoint.trim()) throw new Error('Foundry responses endpoint is required.');
   if (input.reportIds.length === 0) throw new Error('At least one report must be associated.');
   await validateReportIdsBelongToClient(input.reportIds, clientId);
 
   const agentId = randomUUID();
   await queryRows(
     `INSERT INTO ai_agents
-      (id, name, client_id, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
-     VALUES (@id, @name, @client_id, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`,
+      (id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version, security_mode, migration_status, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
+     VALUES (@id, @name, @client_id, @responses_endpoint, @activity_endpoint, @foundry_project, @foundry_agent_name, @foundry_agent_version, @security_mode, @migration_status, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`,
     (request) => {
       request.input('id', sql.NVarChar(64), agentId);
       request.input('name', sql.NVarChar(256), input.name.trim());
       request.input('client_id', sql.NVarChar(128), clientId);
-      request.input('published_url', sql.NVarChar(1024), input.publishedUrl.trim());
-      request.input('mcp_url', sql.NVarChar(1024), input.mcpUrl?.trim() || null);
-      request.input('mcp_tool_name', sql.NVarChar(256), input.mcpToolName?.trim() || null);
+      request.input('responses_endpoint', sql.NVarChar(2048), input.responsesEndpoint.trim());
+      request.input('activity_endpoint', sql.NVarChar(2048), input.activityEndpoint?.trim() || null);
+      request.input('foundry_project', sql.NVarChar(256), input.foundryProject?.trim() || null);
+      request.input('foundry_agent_name', sql.NVarChar(256), input.foundryAgentName?.trim() || null);
+      request.input('foundry_agent_version', sql.NVarChar(64), input.foundryAgentVersion?.trim() || null);
+      request.input('security_mode', sql.NVarChar(32), input.securityMode ?? 'none');
+      request.input('migration_status', sql.NVarChar(32), input.migrationStatus ?? 'manual');
+      request.input('published_url', sql.NVarChar(1024), input.responsesEndpoint.trim());
+      request.input('mcp_url', sql.NVarChar(1024), null);
+      request.input('mcp_tool_name', sql.NVarChar(256), null);
       request.input('is_active', sql.Bit, toBit(input.isActive !== false));
       request.input('created_at', sql.DateTime2, nowIso());
       request.input('updated_at', sql.DateTime2, nowIso());
@@ -1284,14 +1420,21 @@ export async function updateAIAgentFromAdmin(input: UpdateAIAgentInput): Promise
   if (!agentId) throw new Error('Agent id is required.');
   const clientId = await ensureClientExists(input.clientId);
   if (!input.name.trim()) throw new Error('Agent name is required.');
-  if (!input.publishedUrl.trim()) throw new Error('Published URL is required.');
+  if (!input.responsesEndpoint.trim()) throw new Error('Foundry responses endpoint is required.');
   if (input.reportIds.length === 0) throw new Error('At least one report must be associated.');
   await validateReportIdsBelongToClient(input.reportIds, clientId);
 
   await queryRows(
     `UPDATE ai_agents
      SET name = @name,
-       client_id = @client_id,
+         client_id = @client_id,
+         responses_endpoint = @responses_endpoint,
+         activity_endpoint = @activity_endpoint,
+         foundry_project = @foundry_project,
+         foundry_agent_name = @foundry_agent_name,
+         foundry_agent_version = @foundry_agent_version,
+         security_mode = @security_mode,
+         migration_status = @migration_status,
          published_url = @published_url,
          mcp_url = @mcp_url,
          mcp_tool_name = @mcp_tool_name,
@@ -1302,9 +1445,16 @@ export async function updateAIAgentFromAdmin(input: UpdateAIAgentInput): Promise
       request.input('id', sql.NVarChar(64), agentId);
       request.input('name', sql.NVarChar(256), input.name.trim());
       request.input('client_id', sql.NVarChar(128), clientId);
-      request.input('published_url', sql.NVarChar(1024), input.publishedUrl.trim());
-      request.input('mcp_url', sql.NVarChar(1024), input.mcpUrl?.trim() || null);
-      request.input('mcp_tool_name', sql.NVarChar(256), input.mcpToolName?.trim() || null);
+      request.input('responses_endpoint', sql.NVarChar(2048), input.responsesEndpoint.trim());
+      request.input('activity_endpoint', sql.NVarChar(2048), input.activityEndpoint?.trim() || null);
+      request.input('foundry_project', sql.NVarChar(256), input.foundryProject?.trim() || null);
+      request.input('foundry_agent_name', sql.NVarChar(256), input.foundryAgentName?.trim() || null);
+      request.input('foundry_agent_version', sql.NVarChar(64), input.foundryAgentVersion?.trim() || null);
+      request.input('security_mode', sql.NVarChar(32), input.securityMode ?? 'none');
+      request.input('migration_status', sql.NVarChar(32), input.migrationStatus ?? 'manual');
+      request.input('published_url', sql.NVarChar(1024), input.responsesEndpoint.trim());
+      request.input('mcp_url', sql.NVarChar(1024), null);
+      request.input('mcp_tool_name', sql.NVarChar(256), null);
       request.input('is_active', sql.Bit, toBit(input.isActive !== false));
       request.input('updated_at', sql.DateTime2, nowIso());
     }
@@ -1369,7 +1519,8 @@ export async function getAIAgentsForReport(params: {
   }
 
   const rows = await queryRows<DbAIAgent>(
-    `SELECT a.id, a.name, a.client_id, a.published_url, a.mcp_url, a.mcp_tool_name, a.is_active
+    `SELECT a.id, a.name, a.client_id, a.responses_endpoint, a.activity_endpoint, a.foundry_project, a.foundry_agent_name, a.foundry_agent_version,
+            a.security_mode, a.migration_status, a.published_url, a.mcp_url, a.mcp_tool_name, a.is_active
      FROM ai_agents a
      INNER JOIN ai_agent_reports ar ON ar.agent_id = a.id
      INNER JOIN reports r ON r.id = ar.report_id
@@ -1382,9 +1533,13 @@ export async function getAIAgentsForReport(params: {
     id: row.id,
     name: row.name,
     clientId: row.client_id,
-    publishedUrl: row.published_url,
-    mcpUrl: row.mcp_url ?? undefined,
-    mcpToolName: row.mcp_tool_name ?? undefined,
+    responsesEndpoint: (row.responses_endpoint ?? row.published_url ?? '').trim(),
+    activityEndpoint: row.activity_endpoint ?? undefined,
+    foundryProject: row.foundry_project ?? undefined,
+    foundryAgentName: row.foundry_agent_name ?? undefined,
+    foundryAgentVersion: row.foundry_agent_version ?? undefined,
+    securityMode: row.security_mode === 'rls-inherit' ? 'rls-inherit' : 'none',
+    migrationStatus: row.migration_status === 'migrated' || row.migration_status === 'manual' ? row.migration_status : 'legacy',
     reportIds: [params.reportId],
     isActive: toBoolean(row.is_active),
   }));
@@ -1399,7 +1554,8 @@ export async function getAIAgentByIdForUser(params: {
   await ensureDataLayer();
 
   const agent = await queryOne<DbAIAgent>(
-    `SELECT TOP (1) id, name, client_id, published_url, mcp_url, mcp_tool_name, is_active
+    `SELECT TOP (1) id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version,
+            security_mode, migration_status, published_url, mcp_url, mcp_tool_name, is_active
      FROM ai_agents
      WHERE id = @agentId AND is_active = 1`,
     (request) => request.input('agentId', sql.NVarChar(64), params.agentId)
@@ -1463,9 +1619,13 @@ export async function getAIAgentByIdForUser(params: {
     id: agent.id,
     name: agent.name,
     clientId: agent.client_id,
-    publishedUrl: agent.published_url,
-    mcpUrl: agent.mcp_url ?? undefined,
-    mcpToolName: agent.mcp_tool_name ?? undefined,
+    responsesEndpoint: (agent.responses_endpoint ?? agent.published_url ?? '').trim(),
+    activityEndpoint: agent.activity_endpoint ?? undefined,
+    foundryProject: agent.foundry_project ?? undefined,
+    foundryAgentName: agent.foundry_agent_name ?? undefined,
+    foundryAgentVersion: agent.foundry_agent_version ?? undefined,
+    securityMode: agent.security_mode === 'rls-inherit' ? 'rls-inherit' : 'none',
+    migrationStatus: agent.migration_status === 'migrated' || agent.migration_status === 'manual' ? agent.migration_status : 'legacy',
     reportIds,
     isActive: toBoolean(agent.is_active),
   };

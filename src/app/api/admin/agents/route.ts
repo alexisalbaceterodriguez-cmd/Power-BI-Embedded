@@ -22,9 +22,13 @@ export async function POST(request: NextRequest) {
     const payload = (await request.json()) as {
       name?: string;
       clientId?: string;
-      publishedUrl?: string;
-      mcpUrl?: string;
-      mcpToolName?: string;
+      responsesEndpoint?: string;
+      activityEndpoint?: string;
+      foundryProject?: string;
+      foundryAgentName?: string;
+      foundryAgentVersion?: string;
+      securityMode?: 'none' | 'rls-inherit';
+      migrationStatus?: 'migrated' | 'legacy' | 'manual';
       reportIds?: string[] | string;
       isActive?: boolean;
     };
@@ -32,9 +36,13 @@ export async function POST(request: NextRequest) {
     await createAIAgentFromAdmin({
       name: payload.name?.trim() ?? '',
       clientId: payload.clientId?.trim() ?? '',
-      publishedUrl: payload.publishedUrl?.trim() ?? '',
-      mcpUrl: payload.mcpUrl?.trim(),
-      mcpToolName: payload.mcpToolName?.trim(),
+      responsesEndpoint: payload.responsesEndpoint?.trim() ?? '',
+      activityEndpoint: payload.activityEndpoint?.trim(),
+      foundryProject: payload.foundryProject?.trim(),
+      foundryAgentName: payload.foundryAgentName?.trim(),
+      foundryAgentVersion: payload.foundryAgentVersion?.trim(),
+      securityMode: payload.securityMode,
+      migrationStatus: payload.migrationStatus,
       reportIds: Array.isArray(payload.reportIds) ? payload.reportIds : splitCsv(payload.reportIds),
       isActive: payload.isActive,
     });
@@ -67,27 +75,28 @@ export async function PUT(request: NextRequest) {
       id?: string;
       name?: string;
       clientId?: string;
-      publishedUrl?: string;
-      mcpUrl?: string;
-      mcpToolName?: string;
+      responsesEndpoint?: string;
+      activityEndpoint?: string;
+      foundryProject?: string;
+      foundryAgentName?: string;
+      foundryAgentVersion?: string;
+      securityMode?: 'none' | 'rls-inherit';
+      migrationStatus?: 'migrated' | 'legacy' | 'manual';
       reportIds?: string[] | string;
       isActive?: boolean;
     };
-
-    console.log(`[DEBUG] PUT /api/admin/agents - Received payload:`, {
-      id: payload.id,
-      publishedUrl: payload.publishedUrl,
-      name: payload.name,
-      reportIds: Array.isArray(payload.reportIds) ? payload.reportIds : splitCsv(payload.reportIds),
-    });
 
     await updateAIAgentFromAdmin({
       id: payload.id?.trim() ?? '',
       name: payload.name?.trim() ?? '',
       clientId: payload.clientId?.trim() ?? '',
-      publishedUrl: payload.publishedUrl?.trim() ?? '',
-      mcpUrl: payload.mcpUrl?.trim(),
-      mcpToolName: payload.mcpToolName?.trim(),
+      responsesEndpoint: payload.responsesEndpoint?.trim() ?? '',
+      activityEndpoint: payload.activityEndpoint?.trim(),
+      foundryProject: payload.foundryProject?.trim(),
+      foundryAgentName: payload.foundryAgentName?.trim(),
+      foundryAgentVersion: payload.foundryAgentVersion?.trim(),
+      securityMode: payload.securityMode,
+      migrationStatus: payload.migrationStatus,
       reportIds: Array.isArray(payload.reportIds) ? payload.reportIds : splitCsv(payload.reportIds),
       isActive: payload.isActive,
     });

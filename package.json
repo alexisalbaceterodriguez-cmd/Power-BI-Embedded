@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "fabric:health": "node --env-file=.env.local scripts/fabric-health-check.mjs",
+    "foundry:health": "node --env-file=.env.local scripts/foundry-health-check.mjs",
     "db:azure:init": "node --env-file=.env.local scripts/init-azure-sql.mjs",
     "db:azure:seed": "node --env-file=.env.local scripts/seed-azure-sql.mjs",
     "foundry:py:install": "python -m pip install -r requirements-foundry.txt",

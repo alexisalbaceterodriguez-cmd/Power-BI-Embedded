@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 type Role = 'admin' | 'client';
 type AdminTab = 'users' | 'reports' | 'agents';
@@ -39,9 +39,13 @@ interface AgentRow {
   id: string;
   name: string;
   clientId: string;
-  publishedUrl: string;
-  mcpUrl?: string;
-  mcpToolName?: string;
+  responsesEndpoint: string;
+  activityEndpoint?: string;
+  foundryProject?: string;
+  foundryAgentName?: string;
+  foundryAgentVersion?: string;
+  securityMode: 'none' | 'rls-inherit';
+  migrationStatus: 'migrated' | 'legacy' | 'manual';
   reportIds: string[];
   isActive: boolean;
 }
@@ -112,9 +116,13 @@ export default function AdminConsole() {
     id: '',
     name: '',
     clientId: 'cliente-1',
-    publishedUrl: '',
-    mcpUrl: '',
-    mcpToolName: '',
+    responsesEndpoint: '',
+    activityEndpoint: '',
+    foundryProject: '',
+    foundryAgentName: '',
+    foundryAgentVersion: '',
+    securityMode: 'none' as 'none' | 'rls-inherit',
+    migrationStatus: 'manual' as 'migrated' | 'legacy' | 'manual',
     reportIds: [] as string[],
     isActive: true,
   });
@@ -160,12 +168,12 @@ export default function AdminConsole() {
   const filteredAgents = useMemo(() => {
     const term = query.trim().toLowerCase();
     if (!term) return filteredByClientAgents;
-    return filteredByClientAgents.filter((row) => [row.id, row.name, row.publishedUrl, row.mcpUrl ?? '', row.mcpToolName ?? '', row.clientId].join(' ').toLowerCase().includes(term));
+    return filteredByClientAgents.filter((row) => [row.id, row.name, row.responsesEndpoint, row.foundryProject ?? '', row.foundryAgentName ?? '', row.clientId].join(' ').toLowerCase().includes(term));
   }, [query, filteredByClientAgents]);
 
   const sortedReports = useMemo(() => [...filteredByClientReports].sort((a, b) => a.displayName.localeCompare(b.displayName)), [filteredByClientReports]);
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -177,39 +185,33 @@ export default function AdminConsole() {
       setUsers(data.users ?? []);
       setReports(data.reports ?? []);
       setAgents(data.agents ?? []);
-      if (data.agents?.length) {
-        console.log('[ADMIN-LOAD] Agents reloaded from server:', 
-          (data.agents as typeof agents).map((a) => ({ id: a.id, name: a.name, url: a.publishedUrl, clients: a.clientId })).slice(0, 3));
-      }
-    
+
       const nextClients = (data.clients ?? []) as ClientRow[];
       setClients(nextClients);
       const defaultClient = nextClients[0]?.id ?? 'cliente-1';
       setUserForm((prev) => ({ ...prev, clientId: prev.clientId || defaultClient }));
       setReportForm((prev) => ({ ...prev, clientId: prev.clientId || defaultClient }));
-    
-      // Fix: When in edit mode, sync the form with the latest server data
+
       setAgentForm((prev) => {
-        // If we're currently editing an agent, check if it was updated on the server
-        if (prev.id && agentEditingId === prev.id) {
+        if (prev.id) {
           const updatedAgent = (data.agents as typeof agents)?.find((a) => a.id === prev.id);
-          if (updatedAgent && updatedAgent.publishedUrl && updatedAgent.publishedUrl !== prev.publishedUrl) {
-            console.log('[ADMIN-LOAD] Edit mode sync: Updating agentForm from server', {
-              urlChange: `${prev.publishedUrl} → ${updatedAgent.publishedUrl}`,
-            });
+          if (updatedAgent && updatedAgent.responsesEndpoint && updatedAgent.responsesEndpoint !== prev.responsesEndpoint) {
             return {
               id: updatedAgent.id,
               name: updatedAgent.name,
               clientId: updatedAgent.clientId,
-              publishedUrl: updatedAgent.publishedUrl,
-              mcpUrl: updatedAgent.mcpUrl ?? '',
-              mcpToolName: updatedAgent.mcpToolName ?? '',
+              responsesEndpoint: updatedAgent.responsesEndpoint,
+              activityEndpoint: updatedAgent.activityEndpoint ?? '',
+              foundryProject: updatedAgent.foundryProject ?? '',
+              foundryAgentName: updatedAgent.foundryAgentName ?? '',
+              foundryAgentVersion: updatedAgent.foundryAgentVersion ?? '',
+              securityMode: updatedAgent.securityMode,
+              migrationStatus: updatedAgent.migrationStatus,
               reportIds: updatedAgent.reportIds,
               isActive: updatedAgent.isActive,
             };
           }
         }
-        // Not in edit mode or no changes, just update client ID
         return { ...prev, clientId: prev.clientId || defaultClient };
       });
     } catch (err) {
@@ -217,11 +219,11 @@ export default function AdminConsole() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    void loadData();
+  }, [loadData]);
 
   function resetUserForm() {
     setUserEditingId(null);
@@ -259,9 +261,13 @@ export default function AdminConsole() {
       id: '',
       name: '',
       clientId: clients[0]?.id ?? 'cliente-1',
-      publishedUrl: '',
-      mcpUrl: '',
-      mcpToolName: '',
+      responsesEndpoint: '',
+      activityEndpoint: '',
+      foundryProject: '',
+      foundryAgentName: '',
+      foundryAgentVersion: '',
+      securityMode: 'none',
+      migrationStatus: 'manual',
       reportIds: [],
       isActive: true,
     });
@@ -342,27 +348,21 @@ export default function AdminConsole() {
   }
 
   function beginEditAgent(row: AgentRow) {
-    console.log('[AGENT-EDIT] Opening agent for edit:', {
-      id: row.id,
-      name: row.name,
-      publishedUrl: row.publishedUrl,
-      clientId: row.clientId,
-      reportCount: row.reportIds.length,
-    });
-    
     setAgentEditingId(row.id);
     setAgentForm({
       id: row.id,
       name: row.name,
       clientId: row.clientId,
-      publishedUrl: row.publishedUrl,
-      mcpUrl: row.mcpUrl ?? '',
-      mcpToolName: row.mcpToolName ?? '',
+      responsesEndpoint: row.responsesEndpoint,
+      activityEndpoint: row.activityEndpoint ?? '',
+      foundryProject: row.foundryProject ?? '',
+      foundryAgentName: row.foundryAgentName ?? '',
+      foundryAgentVersion: row.foundryAgentVersion ?? '',
+      securityMode: row.securityMode,
+      migrationStatus: row.migrationStatus,
       reportIds: row.reportIds,
       isActive: row.isActive,
     });
-    
-    console.log('[AGENT-EDIT] agentForm state updated');
     setActiveTab('agents');
   }
 
@@ -438,8 +438,8 @@ export default function AdminConsole() {
   }
 
   async function saveAgent() {
-    if (!agentForm.name || !agentForm.publishedUrl || agentForm.reportIds.length === 0) {
-      setError('Completa nombre, URL publicada y al menos un informe para el agente IA.');
+    if (!agentForm.name || !agentForm.responsesEndpoint || agentForm.reportIds.length === 0) {
+      setError('Completa nombre, endpoint de responses y al menos un informe para el agente IA.');
       return;
     }
 
@@ -456,11 +456,7 @@ export default function AdminConsole() {
 
     setBusy(true);
     setError(null);
-    
-    // Save these values to verify after reload
-    const agentIdBeingSaved = agentEditingId;
-    const urlBeingSaved = agentForm.publishedUrl;
-    
+
     try {
       if (agentEditingId) {
         await callAdminApi('/api/admin/agents', 'PUT', agentForm);
@@ -468,32 +464,10 @@ export default function AdminConsole() {
         await callAdminApi('/api/admin/agents', 'POST', agentForm);
       }
 
-      console.log('[AGENT-FIX] API call succeeded, reloading data...');
       resetAgentForm();
       await loadData();
-      
-      // Verification: Check that the data persisted correctly
-      if (agentIdBeingSaved) {
-        try {
-          const verify = await fetch('/api/admin/agents');
-          const verifyData = await verify.json();
-          const savedAgent = (verifyData.agents as typeof agents)?.find((a) => a.id === agentIdBeingSaved);
-          
-          if (savedAgent?.publishedUrl && savedAgent.publishedUrl === urlBeingSaved) {
-            console.log('[AGENT-FIX] ✓ Verification passed - URL persisted correctly:', savedAgent.publishedUrl);
-          } else if (savedAgent) {
-            console.error('[AGENT-FIX] ✗ URL mismatch detected!', {
-              sent: urlBeingSaved,
-              saved: savedAgent.publishedUrl || '(empty)',
-            });
-          }
-        } catch (verifyErr) {
-          console.warn('[AGENT-FIX] Verification fetch failed:', verifyErr);
-        }
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error guardando agente IA');
-      console.error('[AGENT-SAVE] Save failed:', err);
     } finally {
       setBusy(false);
     }
@@ -704,7 +678,7 @@ export default function AdminConsole() {
                     <th>Agente</th>
                     <th>Cliente</th>
                     <th>Reportes</th>
-                    <th>MCP</th>
+                    <th>Seguridad</th>
                     <th>Estado</th>
                     <th></th>
                   </tr>
@@ -718,7 +692,7 @@ export default function AdminConsole() {
                       </td>
                       <td>{row.clientId}</td>
                       <td>{row.reportIds.length}</td>
-                      <td>{row.mcpUrl ? 'Configurado' : 'Sin MCP'}</td>
+                      <td>{row.securityMode === 'rls-inherit' ? 'RLS heredado' : 'Sin RLS'}</td>
                       <td><span className={`admin-pill ${row.isActive ? 'ok' : 'off'}`}>{row.isActive ? 'Activo' : 'Inactivo'}</span></td>
                       <td className="admin-actions">
                         <button className="admin-action-btn" onClick={() => beginEditAgent(row)}>Editar</button>
@@ -804,7 +778,7 @@ export default function AdminConsole() {
 
             {activeTab === 'agents' ? (
               <>
-                <h2>{agentEditingId ? 'Editar agente IA' : 'Nuevo agente IA'}</h2>
+                <h2>{agentEditingId ? 'Editar agente IA Foundry' : 'Nuevo agente IA Foundry'}</h2>
                 <div className="admin-form-grid">
                   <input className="form-input" placeholder="Nombre" value={agentForm.name} onChange={(event) => setAgentForm((prev) => ({ ...prev, name: event.target.value }))} />
                   <select className="form-input" value={agentForm.clientId} onChange={(event) => setAgentForm((prev) => ({ ...prev, clientId: event.target.value, reportIds: [] }))}>
@@ -812,9 +786,15 @@ export default function AdminConsole() {
                       <option key={client.id} value={client.id}>{client.displayName}</option>
                     ))}
                   </select>
-                  <input className="form-input admin-mono-input" placeholder="Published URL" value={agentForm.publishedUrl} onChange={(event) => setAgentForm((prev) => ({ ...prev, publishedUrl: event.target.value }))} />
-                  <input className="form-input admin-mono-input" placeholder="MCP URL (opcional)" value={agentForm.mcpUrl} onChange={(event) => setAgentForm((prev) => ({ ...prev, mcpUrl: event.target.value }))} />
-                  <input className="form-input" placeholder="MCP Tool Name (opcional)" value={agentForm.mcpToolName} onChange={(event) => setAgentForm((prev) => ({ ...prev, mcpToolName: event.target.value }))} />
+                  <input className="form-input admin-mono-input" placeholder="Responses Endpoint (Foundry)" value={agentForm.responsesEndpoint} onChange={(event) => setAgentForm((prev) => ({ ...prev, responsesEndpoint: event.target.value }))} />
+                  <input className="form-input admin-mono-input" placeholder="Activity Endpoint (opcional)" value={agentForm.activityEndpoint} onChange={(event) => setAgentForm((prev) => ({ ...prev, activityEndpoint: event.target.value }))} />
+                  <input className="form-input" placeholder="Proyecto Foundry (opcional)" value={agentForm.foundryProject} onChange={(event) => setAgentForm((prev) => ({ ...prev, foundryProject: event.target.value }))} />
+                  <input className="form-input" placeholder="Nombre de agente Foundry (opcional)" value={agentForm.foundryAgentName} onChange={(event) => setAgentForm((prev) => ({ ...prev, foundryAgentName: event.target.value }))} />
+                  <input className="form-input" placeholder="Version de agente (opcional)" value={agentForm.foundryAgentVersion} onChange={(event) => setAgentForm((prev) => ({ ...prev, foundryAgentVersion: event.target.value }))} />
+                  <select className="form-input" value={agentForm.securityMode} onChange={(event) => setAgentForm((prev) => ({ ...prev, securityMode: event.target.value as 'none' | 'rls-inherit' }))}>
+                    <option value="none">Sin RLS</option>
+                    <option value="rls-inherit">RLS heredado del usuario</option>
+                  </select>
                   <label className="admin-checkbox-inline">
                     <input type="checkbox" checked={agentForm.isActive} onChange={(event) => setAgentForm((prev) => ({ ...prev, isActive: event.target.checked }))} />
                     Agente activo

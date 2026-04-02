@@ -267,6 +267,11 @@ html, body {
   flex-shrink: 0;
 }
 
+.sidebar-ai-logo {
+  width: 13px;
+  height: 13px;
+}
+
 .sidebar-empty {
   padding: 0 1.5rem;
   font-size: 0.875rem;
@@ -313,12 +318,12 @@ html, body {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  border: none;
+  border: 1px solid #bed3e7;
   border-radius: 999px;
-  background: linear-gradient(135deg, #66b6ff 0%, #d8ecff 100%);
-  color: #0a2a43;
+  background: #f7fbff;
+  color: #123b60;
   padding: 0.55rem 0.85rem 0.55rem 0.6rem;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
   margin-right: 1rem;
@@ -328,17 +333,22 @@ html, body {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.8);
+  background: #e6f1fb;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.header-ai-logo {
+  width: 18px;
+  height: 18px;
 }
 
 .header-ai-count {
   min-width: 20px;
   height: 20px;
   border-radius: 999px;
-  background: #111111;
+  background: #1a3f60;
   color: #ffffff;
   font-size: 0.6875rem;
   display: inline-flex;
@@ -360,7 +370,7 @@ html, body {
   width: min(420px, 100%);
   background: #ffffff;
   border-left: 1px solid var(--seidor-border);
-  box-shadow: -6px 0 14px rgba(0, 0, 0, 0.08);
+  box-shadow: -10px 0 24px rgba(7, 36, 62, 0.12);
   z-index: 35;
   display: flex;
   flex-direction: column;
@@ -379,7 +389,7 @@ html, body {
   font-size: 0.6875rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #0e5ca0;
+  color: #1f507e;
   font-weight: 700;
 }
 
@@ -397,6 +407,37 @@ html, body {
 .ai-agent-note {
   font-size: 0.75rem;
   color: var(--seidor-gray);
+}
+
+.ai-agent-badges {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.ai-agent-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 0.6rem;
+  border-radius: 999px;
+  border: 1px solid #c8daea;
+  background: #f5f9fd;
+  color: #2c5578;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.ai-agent-badge.is-secure {
+  border-color: #c3dcb8;
+  background: #eef8ea;
+  color: #245c2a;
+}
+
+.ai-agent-badge.is-open {
+  border-color: #e2d1b8;
+  background: #fbf5ec;
+  color: #7a5a2f;
 }
 
 .ai-messages {

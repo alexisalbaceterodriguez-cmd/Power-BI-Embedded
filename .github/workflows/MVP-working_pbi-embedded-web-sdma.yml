@@ -32,6 +32,16 @@ jobs:
         npm run build --if-present
         npm run test --if-present
 
+    - name: Prepare standalone artifact
+      run: |
+        rm -rf deploy
+        mkdir -p deploy/.next
+        cp -R .next/standalone/. deploy/
+        cp -R .next/static deploy/.next/static
+        if [ -d public ]; then
+          cp -R public deploy/public
+        fi
+
     - name: Azure Login
       uses: azure/login@v2
       with:
@@ -42,4 +52,4 @@ jobs:
       with: 
         app-name: 'pbi-embedded-web-sdma'
         slot-name: 'production'
-        package: .
+        package: ./deploy

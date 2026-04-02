@@ -133,6 +133,41 @@ function getBoolEnv(name: string, defaultValue: boolean): boolean {
   return value === 'true' || value === '1' || value === 'yes';
 }
 
+function getBootstrapLegacyDefaultsEnabled(): boolean {
+  return getBoolEnv('BOOTSTRAP_ENABLE_LEGACY_DEFAULTS', false);
+}
+
+function getBootstrapDefaultClientId(): string | undefined {
+  const fromEnv = normalizeClientId(process.env.BOOTSTRAP_DEFAULT_CLIENT_ID);
+  if (fromEnv) return fromEnv;
+  return getBootstrapLegacyDefaultsEnabled() ? 'cliente-1' : undefined;
+}
+
+function resolveBootstrapClientId(candidate?: string | null): string | undefined {
+  const normalized = normalizeClientId(candidate);
+  if (normalized) return normalized;
+  return getBootstrapDefaultClientId();
+}
+
+function getBootstrapReportClientAssignments(): Array<{ reportId: string; clientId: string }> {
+  const fromEnv = process.env.BOOTSTRAP_REPORT_CLIENT_ASSIGNMENTS_JSON;
+  if (!fromEnv) return [];
+
+  try {
+    const parsed = JSON.parse(fromEnv) as Array<{ reportId?: string; clientId?: string }>;
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .map((item) => ({
+        reportId: item.reportId?.trim() ?? '',
+        clientId: normalizeClientId(item.clientId) ?? '',
+      }))
+      .filter((item) => Boolean(item.reportId && item.clientId));
+  } catch {
+    return [];
+  }
+}
+
 function getBootstrapReports(): CreateReportInput[] {
   const fromEnv = process.env.BOOTSTRAP_REPORTS_JSON;
   if (fromEnv) {
@@ -144,11 +179,12 @@ function getBootstrapReports(): CreateReportInput[] {
     }
   }
 
-  if (process.env.WORKSPACE_ID && process.env.REPORT_ID) {
+  const defaultClientId = getBootstrapDefaultClientId();
+  if (process.env.WORKSPACE_ID && process.env.REPORT_ID && defaultClientId) {
     return [{
       id: 'default-report',
       displayName: 'Default Report',
-      clientId: 'cliente-1',
+      clientId: defaultClientId,
       workspaceId: process.env.WORKSPACE_ID,
       reportId: process.env.REPORT_ID,
       isActive: true,
@@ -175,6 +211,10 @@ function getBootstrapClients(): Array<{ id: string; displayName: string; isActiv
     } catch {
       // no-op
     }
+  }
+
+  if (!getBootstrapLegacyDefaultsEnabled()) {
+    return [];
   }
 
   return [
@@ -231,9 +271,12 @@ function getBootstrapAIAgents(): CreateAIAgentInput[] {
 
       if (!responsesEndpoint.trim()) continue;
 
+      const clientId = resolveBootstrapClientId(typeof entry.clientId === 'string' ? entry.clientId : undefined);
+      if (!clientId) continue;
+
       output.push({
         name: typeof entry.name === 'string' ? entry.name : 'foundry-agent',
-        clientId: typeof entry.clientId === 'string' ? entry.clientId : 'cliente-1',
+        clientId,
         responsesEndpoint,
         activityEndpoint: typeof entry.activityEndpoint === 'string' ? entry.activityEndpoint : undefined,
         foundryProject: typeof entry.foundryProject === 'string' ? entry.foundryProject : undefined,
@@ -587,41 +630,61 @@ async function backfillDefaultClientsAndAssignments(): Promise<void> {
     );
   }
 
-  await queryRows(
-    `UPDATE reports
-     SET client_id = 'cliente-1'
-     WHERE client_id IS NULL AND display_name IN ('Finance Controlling', 'Informe Webinar')`
-  );
-
-  await queryRows(
-    `UPDATE reports
-     SET client_id = 'cliente-2'
-      WHERE client_id IS NULL AND display_name IN ('Calculadora de precio optimo', 'Calculadora de precio óptimo')`
-  );
-
-  await queryRows(
-    `UPDATE reports
-     SET client_id = 'cliente-1'
-     WHERE client_id IS NULL`
-  );
-
-  await queryRows(
-    `UPDATE users
-     SET client_id = 'cliente-1'
-     WHERE role <> 'admin' AND client_id IS NULL`
-  );
+  const explicitAssignments = getBootstrapReportClientAssignments();
+  for (const assignment of explicitAssignments) {
+    await queryRows(
+      `UPDATE reports
+       SET client_id = @client_id
+       WHERE id = @report_id AND client_id IS NULL`,
+      (request) => {
+        request.input('client_id', sql.NVarChar(128), assignment.clientId);
+        request.input('report_id', sql.NVarChar(128), assignment.reportId);
+      }
+    );
+  }
 
   await queryRows(
     `UPDATE ai_agents
-     SET client_id = COALESCE(
-       (SELECT TOP (1) r.client_id
-        FROM ai_agent_reports ar
-        INNER JOIN reports r ON r.id = ar.report_id
-        WHERE ar.agent_id = ai_agents.id),
-       'cliente-1'
+     SET client_id = (
+       SELECT TOP (1) r.client_id
+       FROM ai_agent_reports ar
+       INNER JOIN reports r ON r.id = ar.report_id
+       WHERE ar.agent_id = ai_agents.id
+         AND r.client_id IS NOT NULL
      )
-     WHERE client_id IS NULL`
+     WHERE client_id IS NULL
+       AND EXISTS (
+         SELECT 1
+         FROM ai_agent_reports ar
+         INNER JOIN reports r ON r.id = ar.report_id
+         WHERE ar.agent_id = ai_agents.id
+           AND r.client_id IS NOT NULL
+       )`
   );
+
+  const defaultClientId = getBootstrapDefaultClientId();
+  if (defaultClientId) {
+    await queryRows(
+      `UPDATE reports
+       SET client_id = @client_id
+       WHERE client_id IS NULL`,
+      (request) => request.input('client_id', sql.NVarChar(128), defaultClientId)
+    );
+
+    await queryRows(
+      `UPDATE users
+       SET client_id = @client_id
+       WHERE role <> 'admin' AND client_id IS NULL`,
+      (request) => request.input('client_id', sql.NVarChar(128), defaultClientId)
+    );
+
+    await queryRows(
+      `UPDATE ai_agents
+       SET client_id = @client_id
+       WHERE client_id IS NULL`,
+      (request) => request.input('client_id', sql.NVarChar(128), defaultClientId)
+    );
+  }
 
   await queryRows(
     `UPDATE ai_agents
@@ -661,7 +724,10 @@ async function seedBootstrapData(): Promise<void> {
   const reportCount = await queryOne<{ count: number }>('SELECT COUNT(*) AS count FROM reports');
   if ((reportCount?.count ?? 0) === 0) {
     for (const report of getBootstrapReports()) {
-      const reportClientId = normalizeClientId(report.clientId) ?? 'cliente-1';
+      const reportClientId = resolveBootstrapClientId(report.clientId);
+      if (!reportClientId) {
+        throw new Error(`Bootstrap report ${report.id} is missing clientId. Define report.clientId or BOOTSTRAP_DEFAULT_CLIENT_ID.`);
+      }
       await queryRows(
         `INSERT INTO reports
           (id, display_name, client_id, workspace_id, report_id, rls_roles_json, admin_rls_roles_json, admin_rls_username, is_active, created_at, updated_at)
@@ -729,7 +795,10 @@ async function seedBootstrapData(): Promise<void> {
     if (!normalizedUsername || normalizedUsername.toLowerCase() === adminUsername.toLowerCase()) continue;
 
     const userId = user.id ?? randomUUID();
-    const userClientId = normalizeClientId(user.clientId) ?? 'cliente-1';
+    const userClientId = resolveBootstrapClientId(user.clientId);
+    if (user.role !== 'admin' && !userClientId) {
+      throw new Error(`Bootstrap user ${normalizedUsername} is missing clientId. Define user.clientId or BOOTSTRAP_DEFAULT_CLIENT_ID.`);
+    }
     await queryRows(
       `INSERT INTO users
         (id, username, email, password_hash, role, client_id, is_active, expires_at, created_at, updated_at)
@@ -785,7 +854,10 @@ async function seedBootstrapData(): Promise<void> {
 
   for (const agent of getBootstrapAIAgents()) {
     const agentId = randomUUID();
-    const agentClientId = normalizeClientId(agent.clientId) ?? 'cliente-1';
+    const agentClientId = resolveBootstrapClientId(agent.clientId);
+    if (!agentClientId) {
+      throw new Error(`Bootstrap agent ${agent.name} is missing clientId. Define agent.clientId or BOOTSTRAP_DEFAULT_CLIENT_ID.`);
+    }
     await queryRows(
       `INSERT INTO ai_agents
         (id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version, security_mode, migration_status, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
@@ -947,6 +1019,11 @@ export async function getAccessibleReportsForUser(userId: string, role: UserRole
       (request) => request.input('userId', sql.NVarChar(64), userId)
     );
 
+  const normalizedUserClientId = normalizeClientId(userClient?.client_id);
+  if (role !== 'admin' && !normalizedUserClientId) {
+    return [];
+  }
+
   const rows = role === 'admin'
     ? await queryRows<{ id: string; display_name: string; client_id: string; client_display_name: string | null; ai_agent_count: number }>(
       `SELECT r.id, r.display_name, r.client_id, c.display_name AS client_display_name, COUNT(a.id) AS ai_agent_count
@@ -970,7 +1047,7 @@ export async function getAccessibleReportsForUser(userId: string, role: UserRole
        ORDER BY r.display_name ASC`,
       (request) => {
         request.input('userId', sql.NVarChar(64), userId);
-        request.input('clientId', sql.NVarChar(128), normalizeClientId(userClient?.client_id) ?? 'cliente-1');
+        request.input('clientId', sql.NVarChar(128), normalizedUserClientId!);
       }
     );
 

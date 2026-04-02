@@ -10,6 +10,24 @@ interface FoundryTokenCache {
   expiresAtMs: number;
 }
 
+function hasScopeAttributes(scopeAttributes?: Record<string, string[]>): boolean {
+  if (!scopeAttributes) return false;
+  return Object.values(scopeAttributes).some((values) => Array.isArray(values) && values.length > 0);
+}
+
+function serializeScopeAttributes(scopeAttributes?: Record<string, string[]>): string | null {
+  if (!scopeAttributes) return null;
+
+  const parts: string[] = [];
+  for (const [key, values] of Object.entries(scopeAttributes)) {
+    if (!values || values.length === 0) continue;
+    parts.push(`${key}:${values.join('|')}`);
+  }
+
+  if (parts.length === 0) return null;
+  return parts.join(';');
+}
+
 let foundryTokenCache: FoundryTokenCache | null = null;
 
 function cachedFoundryToken(expectedSource?: 'sp' | 'azure-cli'): string | null {
@@ -185,6 +203,8 @@ export async function chatWithFoundryAgent(params: {
   securityMode: 'none' | 'rls-inherit';
   userName?: string;
   rlsRoles?: string[];
+  scopeCompanyIds?: string[];
+  scopeAttributes?: Record<string, string[]>;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
 }): Promise<string> {
   const userMessage = latestUserQuestion(params.messages);
@@ -197,9 +217,26 @@ export async function chatWithFoundryAgent(params: {
   }
 
   const token = await getFoundryApiToken();
+  const hasRoles = Boolean(params.rlsRoles && params.rlsRoles.length > 0);
+  const hasScopeIds = Boolean(params.scopeCompanyIds && params.scopeCompanyIds.length > 0);
+  const hasScopeAttrs = hasScopeAttributes(params.scopeAttributes);
+  const contextParts: string[] = [`user=${params.userName ?? 'unknown'}`];
+  if (hasRoles) {
+    contextParts.push(`roles=${params.rlsRoles!.join(',')}`);
+  }
+  if (hasScopeIds) {
+    contextParts.push(`companyIds=${params.scopeCompanyIds!.join(',')}`);
+  }
+  if (hasScopeAttrs) {
+    const serialized = serializeScopeAttributes(params.scopeAttributes);
+    if (serialized) {
+      contextParts.push(`scope=${serialized}`);
+    }
+  }
+
   const inputText =
-    params.securityMode === 'rls-inherit' && params.rlsRoles && params.rlsRoles.length > 0
-      ? `[RLS user=${params.userName ?? 'unknown'} roles=${params.rlsRoles.join(',')}] ${userMessage}`
+    params.securityMode === 'rls-inherit' && (hasRoles || hasScopeIds || hasScopeAttrs)
+      ? `[RLS ${contextParts.join(' ')}] ${userMessage}`
       : userMessage;
 
   const response = await fetch(params.responsesEndpoint, {

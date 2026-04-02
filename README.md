@@ -16,6 +16,51 @@ Estado actual del producto:
 3. Chat IA server-side en API route interna con token de aplicacion a Foundry.
 4. UI de chat embebida en el dashboard de reportes.
 
+## API de chat (RLS)
+
+Endpoint: `POST /api/ai-agents/chat`
+
+Payload minimo:
+
+```json
+{
+	"agentId": "<agent-id>",
+	"reportId": "<report-id>",
+	"messages": [{ "role": "user", "content": "..." }]
+}
+```
+
+Payload recomendado para scope estructurado:
+
+```json
+{
+	"agentId": "<agent-id>",
+	"reportId": "<report-id>",
+	"scopeCompanyIds": ["1", "2"],
+	"messages": [{ "role": "user", "content": "..." }]
+}
+```
+
+Payload para alcance multidimension (roles no basados en empresa):
+
+```json
+{
+	"agentId": "<agent-id>",
+	"reportId": "<report-id>",
+	"scopeAttributes": {
+		"region": ["norte"],
+		"canal": ["b2b"]
+	},
+	"messages": [{ "role": "user", "content": "..." }]
+}
+```
+
+Notas:
+
+- `scopeCompanyIds` es opcional y permite validacion de alcance sin depender de texto libre.
+- `scopeAttributes` permite enforcement de alcance por cualquier dimension (region, canal, segmento, etc.) si el rol RLS incluye esos atributos.
+- Si no se envia, el backend mantiene compatibilidad con extraccion de empresas desde texto.
+
 ## Variables de entorno
 
 ```env
@@ -47,9 +92,16 @@ FOUNDRY_AUTH_MODE="azure-cli"
 # Bootstrap opcional
 BOOTSTRAP_ADMIN_USERNAME="admin"
 BOOTSTRAP_ADMIN_EMAIL="admin@contoso.com"
-BOOTSTRAP_REPORTS_JSON='[{"id":"finance","displayName":"Finance","workspaceId":"...","reportId":"..."}]'
-BOOTSTRAP_USERS_JSON='[{"username":"cliente_finance","email":"cliente@contoso.com","role":"client","reportIds":["finance"],"rlsRoles":["Empresa 01"]}]'
-BOOTSTRAP_AI_AGENTS_JSON='[{"name":"agent-sales","responsesEndpoint":"https://.../protocols/openai/responses?...","activityEndpoint":"https://.../protocols/activityprotocol?...","foundryProject":"project-name","foundryAgentName":"app-name","foundryAgentVersion":"1","securityMode":"none","reportIds":["finance"],"isActive":true}]'
+BOOTSTRAP_CLIENTS_JSON='[{"id":"contoso-fin","displayName":"Contoso Finance"}]'
+BOOTSTRAP_DEFAULT_CLIENT_ID="contoso-fin"
+BOOTSTRAP_REPORTS_JSON='[{"id":"finance","displayName":"Finance","clientId":"contoso-fin","workspaceId":"...","reportId":"..."}]'
+BOOTSTRAP_USERS_JSON='[{"username":"cliente_finance","email":"cliente@contoso.com","role":"client","clientId":"contoso-fin","reportIds":["finance"],"rlsRoles":["Empresa 01"]}]'
+BOOTSTRAP_AI_AGENTS_JSON='[{"name":"agent-sales","clientId":"contoso-fin","responsesEndpoint":"https://.../protocols/openai/responses?...","activityEndpoint":"https://.../protocols/activityprotocol?...","foundryProject":"project-name","foundryAgentName":"app-name","foundryAgentVersion":"1","securityMode":"none","reportIds":["finance"],"isActive":true}]'
+BOOTSTRAP_REPORT_CLIENT_ASSIGNMENTS_JSON='[{"reportId":"finance","clientId":"contoso-fin"}]'
+BOOTSTRAP_ENABLE_LEGACY_DEFAULTS="false"
+
+# Legacy demo mode (solo para entornos de ejemplo)
+# BOOTSTRAP_ENABLE_LEGACY_DEFAULTS="true"
 ```
 
 ## Comandos

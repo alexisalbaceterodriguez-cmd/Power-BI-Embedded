@@ -20,10 +20,11 @@ interface AIAgentDrawerProps {
   open: boolean;
   reportId: string;
   agents: AgentSummary[];
+  scopeAttributes?: Record<string, string[]>;
   onClose: () => void;
 }
 
-export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAgentDrawerProps) {
+export default function AIAgentDrawer({ open, reportId, agents, scopeAttributes, onClose }: AIAgentDrawerProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -57,6 +58,7 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
         body: JSON.stringify({
           reportId,
           agentId: selectedAgent.id,
+          scopeAttributes,
           messages: conversation,
         }),
       });

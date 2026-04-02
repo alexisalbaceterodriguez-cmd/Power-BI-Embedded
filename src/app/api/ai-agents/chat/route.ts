@@ -1,61 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { getAIAgentByIdForUser, getSecureReportConfigForUser, recordAuditEvent } from '@/lib/dal';
+import {
+  extractScopeAttributesFromRoles,
+  extractCompanyIdsFromRoles,
+  extractCompanyIdsFromText,
+  hasScopeAttributes,
+  listDisallowedCompanyIds,
+  listDisallowedScopeAttributes,
+  normalizeCompanyIds,
+  normalizeScopeAttributes,
+  type ScopeAttributes,
+} from '@/lib/rlsScope';
 import { chatWithFoundryAgent } from '@/services/foundryAgents';
 import { PowerBIServiceError } from '@/services/powerbi';
 
 export const runtime = 'nodejs';
 
-function normalizeForScopeCheck(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
-
-function extractCompanyIdsFromText(text: string): string[] {
-  const normalized = normalizeForScopeCheck(text);
-  const ids = new Set<string>();
-  const regex = /(?:empresa|compania|compa.{0,2}ia)\s*(?:n(?:umero|ro)?\.?\s*)?0*(\d{1,3})/g;
-
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(normalized)) !== null) {
-    const value = String(Number(match[1]));
-    if (value !== '0' && value !== 'NaN') {
-      ids.add(value);
-    }
-  }
-
-  return [...ids];
-}
-
-function extractAllowedCompanyIdsFromRoles(roles?: string[]): string[] {
-  if (!roles || roles.length === 0) return [];
-
-  const ids = new Set<string>();
-  for (const role of roles) {
-    const normalized = normalizeForScopeCheck(role);
-    const regex = /empresa\s*0*(\d{1,3})/g;
-    let match: RegExpExecArray | null;
-    while ((match = regex.exec(normalized)) !== null) {
-      const value = String(Number(match[1]));
-      if (value !== '0' && value !== 'NaN') {
-        ids.add(value);
-      }
-    }
-  }
-
-  return [...ids];
-}
-
 function getLatestUserMessage(messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>): string {
   const latestUser = [...messages].reverse().find((message) => message.role === 'user' && message.content.trim());
   return latestUser?.content.trim() ?? '';
-}
-
-function listDisallowedCompanyIds(referencedCompanyIds: string[], allowedCompanyIds: string[]): string[] {
-  const allowed = new Set(allowedCompanyIds);
-  return referencedCompanyIds.filter((companyId) => !allowed.has(companyId));
 }
 
 function getClientIp(request: NextRequest): string | undefined {
@@ -76,6 +40,8 @@ export async function POST(request: NextRequest) {
     const payload = (await request.json()) as {
       agentId?: string;
       reportId?: string;
+      scopeCompanyIds?: string[];
+      scopeAttributes?: Record<string, string | string[]>;
       messages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
     };
 
@@ -91,6 +57,9 @@ export async function POST(request: NextRequest) {
     }
 
     const latestUserMessage = getLatestUserMessage(messages);
+    const requestedScopeCompanyIds = normalizeCompanyIds(Array.isArray(payload.scopeCompanyIds) ? payload.scopeCompanyIds : []);
+    const requestedScopeAttributes = normalizeScopeAttributes(payload.scopeAttributes);
+    const hasRequestedScopeAttributes = hasScopeAttributes(requestedScopeAttributes);
 
     const agent = await getAIAgentByIdForUser({
       userId: session.user.id,
@@ -113,6 +82,9 @@ export async function POST(request: NextRequest) {
     let effectiveUserName = session.user.email ?? session.user.name ?? session.user.id;
     let effectiveRlsRoles = session.user.rlsRoles;
     let allowedCompanyIds: string[] = [];
+    let allowedScopeAttributes: ScopeAttributes = {};
+    let effectiveScopeCompanyIds: string[] = requestedScopeCompanyIds;
+    let effectiveScopeAttributes: ScopeAttributes = requestedScopeAttributes;
 
     if (agent.securityMode === 'rls-inherit') {
       if (!requestedReportId) {
@@ -159,9 +131,53 @@ export async function POST(request: NextRequest) {
         effectiveRlsRoles = intersection;
       }
 
-      allowedCompanyIds = extractAllowedCompanyIdsFromRoles(effectiveRlsRoles);
+      allowedScopeAttributes = extractScopeAttributesFromRoles(effectiveRlsRoles);
+      if (!hasRequestedScopeAttributes) {
+        effectiveScopeAttributes = allowedScopeAttributes;
+      }
+
+      if (hasRequestedScopeAttributes) {
+        const disallowedScopeAttributes = listDisallowedScopeAttributes(requestedScopeAttributes, allowedScopeAttributes);
+        if (disallowedScopeAttributes.length > 0) {
+          await recordAuditEvent({
+            eventType: 'agent.chat.rls_denied',
+            userId: session.user.id,
+            ip,
+            detail: {
+              agentId,
+              reportId: requestedReportId,
+              reason: 'scope_attributes_out_of_scope',
+              requestedScopeAttributes,
+              allowedScopeAttributes,
+              disallowedScopeAttributes,
+            },
+          });
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+      }
+
+      allowedCompanyIds = extractCompanyIdsFromRoles(effectiveRlsRoles);
+      effectiveScopeCompanyIds = requestedScopeCompanyIds.length > 0 ? requestedScopeCompanyIds : allowedCompanyIds;
+
+      if (requestedScopeCompanyIds.length > 0 && allowedCompanyIds.length === 0) {
+        await recordAuditEvent({
+          eventType: 'agent.chat.rls_denied',
+          userId: session.user.id,
+          ip,
+          detail: {
+            agentId,
+            reportId: requestedReportId,
+            reason: 'company_scope_not_allowed',
+            requestedScopeCompanyIds,
+          },
+        });
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+
       if (allowedCompanyIds.length > 0 && latestUserMessage) {
-        const referencedCompanyIds = extractCompanyIdsFromText(latestUserMessage);
+        const referencedCompanyIds = requestedScopeCompanyIds.length > 0
+          ? requestedScopeCompanyIds
+          : extractCompanyIdsFromText(latestUserMessage);
         const disallowedCompanyIds = listDisallowedCompanyIds(referencedCompanyIds, allowedCompanyIds);
         if (disallowedCompanyIds.length > 0) {
           await recordAuditEvent({
@@ -171,7 +187,7 @@ export async function POST(request: NextRequest) {
             detail: {
               agentId,
               reportId: requestedReportId,
-              reason: 'query_out_of_scope',
+              reason: requestedScopeCompanyIds.length > 0 ? 'scope_out_of_scope' : 'query_out_of_scope',
               referencedCompanyIds,
               allowedCompanyIds,
               disallowedCompanyIds,
@@ -187,6 +203,8 @@ export async function POST(request: NextRequest) {
       securityMode: agent.securityMode,
       userName: effectiveUserName,
       rlsRoles: effectiveRlsRoles,
+      scopeCompanyIds: effectiveScopeCompanyIds,
+      scopeAttributes: effectiveScopeAttributes,
       messages,
     });
 

@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PowerBIEmbed } from 'powerbi-client-react';
 import { models } from 'powerbi-client';
 import { signOut } from 'next-auth/react';
 
 interface EmbeddedReportProps {
   reportId: string;
+  onScopeAttributesChange?: (scopeAttributes: Record<string, string[]>) => void;
 }
 
 interface EmbedConfig {
@@ -23,13 +24,100 @@ interface EmbedConfig {
  * Fetches an embed token for a specific reportId and renders the Power BI iframe.
  * Re-fetches when the reportId prop changes (user selects a different report).
  */
-export default function EmbeddedReport({ reportId }: EmbeddedReportProps) {
+function normalizeScopePart(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function addScopeValue(target: Record<string, string[]>, keyRaw: string, valueRaw: unknown): void {
+  if (typeof valueRaw !== 'string' && typeof valueRaw !== 'number' && typeof valueRaw !== 'boolean') return;
+
+  const key = normalizeScopePart(keyRaw);
+  const value = normalizeScopePart(String(valueRaw));
+  if (!key || !value) return;
+
+  const current = target[key] ?? [];
+  if (!current.includes(value)) {
+    current.push(value);
+    target[key] = current;
+  }
+}
+
+function targetColumnName(rawTarget: unknown): string | null {
+  if (!rawTarget || typeof rawTarget !== 'object') return null;
+  const target = rawTarget as { column?: unknown };
+  return typeof target.column === 'string' ? target.column : null;
+}
+
+function collectScopeAttributesFromFilters(filters: unknown[]): Record<string, string[]> {
+  const scopeAttributes: Record<string, string[]> = {};
+
+  for (const rawFilter of filters) {
+    if (!rawFilter || typeof rawFilter !== 'object') continue;
+    const filter = rawFilter as { target?: unknown; values?: unknown; conditions?: unknown };
+
+    const columnName = targetColumnName(filter.target);
+    if (!columnName) continue;
+
+    if (Array.isArray(filter.values)) {
+      for (const value of filter.values) {
+        addScopeValue(scopeAttributes, columnName, value);
+      }
+      continue;
+    }
+
+    if (Array.isArray(filter.conditions)) {
+      for (const rawCondition of filter.conditions) {
+        if (!rawCondition || typeof rawCondition !== 'object') continue;
+        const condition = rawCondition as { value?: unknown; value2?: unknown };
+        addScopeValue(scopeAttributes, columnName, condition.value);
+        addScopeValue(scopeAttributes, columnName, condition.value2);
+      }
+    }
+  }
+
+  return scopeAttributes;
+}
+
+export default function EmbeddedReport({ reportId, onScopeAttributesChange }: EmbeddedReportProps) {
   const [embedConfig, setEmbedConfig] = useState<EmbedConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
+  const reportRef = useRef<{
+    getFilters?: () => Promise<unknown[]>;
+    getActivePage?: () => Promise<{ getFilters?: () => Promise<unknown[]> }>;
+  } | null>(null);
+
+  const refreshScopeAttributes = useCallback(async () => {
+    if (!onScopeAttributesChange) return;
+    const report = reportRef.current;
+    if (!report || typeof report.getFilters !== 'function') return;
+
+    try {
+      const reportFilters = await report.getFilters();
+      let pageFilters: unknown[] = [];
+
+      if (typeof report.getActivePage === 'function') {
+        const page = await report.getActivePage();
+        if (page && typeof page.getFilters === 'function') {
+          pageFilters = await page.getFilters();
+        }
+      }
+
+      const scopeAttributes = collectScopeAttributesFromFilters([...(reportFilters ?? []), ...pageFilters]);
+      onScopeAttributesChange(scopeAttributes);
+    } catch {
+      // Scope extraction is best-effort; chat still works without it.
+    }
+  }, [onScopeAttributesChange]);
 
   useEffect(() => {
+    onScopeAttributesChange?.({});
     setLoading(true);
     setError(null);
     setEmbedConfig(null);
@@ -91,8 +179,19 @@ export default function EmbeddedReport({ reportId }: EmbeddedReportProps) {
 
     return () => {
       cancelled = true;
+      reportRef.current = null;
     };
-  }, [reportId, retryCount]);
+  }, [reportId, retryCount, onScopeAttributesChange]);
+
+  useEffect(() => {
+    if (!embedConfig || !onScopeAttributesChange) return;
+
+    const intervalId = setInterval(() => {
+      void refreshScopeAttributes();
+    }, 5000);
+
+    return () => clearInterval(intervalId);
+  }, [embedConfig, refreshScopeAttributes, onScopeAttributesChange]);
 
   if (loading) {
     return (
@@ -146,6 +245,20 @@ export default function EmbeddedReport({ reportId }: EmbeddedReportProps) {
           },
         }}
         cssClassName="powerbi-iframe"
+        getEmbeddedComponent={(embeddedComponent) => {
+          reportRef.current = embeddedComponent as {
+            getFilters?: () => Promise<unknown[]>;
+            getActivePage?: () => Promise<{ getFilters?: () => Promise<unknown[]> }>;
+          };
+        }}
+        eventHandlers={
+          new Map([
+            ['loaded', () => { void refreshScopeAttributes(); }],
+            ['rendered', () => { void refreshScopeAttributes(); }],
+            ['pageChanged', () => { void refreshScopeAttributes(); }],
+            ['dataSelected', () => { void refreshScopeAttributes(); }],
+          ])
+        }
       />
     </div>
   );

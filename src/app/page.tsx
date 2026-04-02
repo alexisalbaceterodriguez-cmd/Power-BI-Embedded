@@ -39,6 +39,7 @@ export default function Home() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [agentsError, setAgentsError] = useState<string | null>(null);
+  const [reportScopeAttributes, setReportScopeAttributes] = useState<Record<string, string[]>>({});
 
   const activeReport = useMemo(
     () => reports.find((report) => report.id === activeReportId) ?? null,
@@ -51,6 +52,7 @@ export default function Home() {
   const handleSelectReport = useCallback((reportId: string) => {
     setActiveReportId(reportId);
     setAgentsOpen(false);
+    setReportScopeAttributes({});
   }, []);
 
   const handleOpenAi = useCallback(() => {
@@ -201,6 +203,7 @@ export default function Home() {
             open={agentsOpen}
             reportId={activeReportId}
             agents={agents}
+            scopeAttributes={reportScopeAttributes}
             onClose={() => setAgentsOpen(false)}
           />
         ) : null}
@@ -225,7 +228,10 @@ export default function Home() {
                 {agentsError}
               </div>
             ) : null}
-            <EmbeddedReport reportId={activeReportId} />
+            <EmbeddedReport
+              reportId={activeReportId}
+              onScopeAttributesChange={setReportScopeAttributes}
+            />
           </>
         ) : (
           <div className="state-container">

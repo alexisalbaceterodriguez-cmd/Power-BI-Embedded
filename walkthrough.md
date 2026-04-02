@@ -16,9 +16,18 @@
    - `NEXTAUTH_SECRET`
    - `NEXTAUTH_URL`
 3. Definir bootstrap inicial (opcional):
+   - `BOOTSTRAP_CLIENTS_JSON`
+   - `BOOTSTRAP_DEFAULT_CLIENT_ID`
    - `BOOTSTRAP_REPORTS_JSON`
    - `BOOTSTRAP_ADMIN_EMAIL`
    - `BOOTSTRAP_USERS_JSON`
+   - `BOOTSTRAP_AI_AGENTS_JSON`
+   - `BOOTSTRAP_REPORT_CLIENT_ASSIGNMENTS_JSON`
+
+Modo seguro por defecto:
+
+- No se asigna automaticamente `client_id` por nombre de reporte ni por cliente hardcodeado.
+- Para volver al modo demo legacy, activar `BOOTSTRAP_ENABLE_LEGACY_DEFAULTS=true`.
 
 Compatibilidad temporal:
 

@@ -82,6 +82,18 @@ Nota:
 4. Build de regresion:
    - `npm run build`
 
+Validacion recomendada de alcance estructurado:
+
+1. Invocar `POST /api/ai-agents/chat` con `scopeCompanyIds` (por ejemplo `['1']`).
+2. Verificar que cualquier id fuera de alcance retorna `403`.
+3. Confirmar evento `agent.chat.rls_denied` en `audit_log` con razon `scope_out_of_scope`.
+
+Validacion recomendada de alcance multidimension:
+
+1. Invocar `POST /api/ai-agents/chat` con `scopeAttributes` (por ejemplo `{"region":["norte"],"canal":["b2b"]}`).
+2. Verificar que combinaciones fuera de rol retornan `403`.
+3. Confirmar evento `agent.chat.rls_denied` con razon `scope_attributes_out_of_scope`.
+
 ## 7) Troubleshooting rapido
 
 1. `401/403` en chat Foundry:
@@ -91,6 +103,8 @@ Nota:
    - Revisar `user_report_access`, cliente y estado activo.
 3. Error de datos con RLS:
    - Revisar `user_rls_roles` y modo de seguridad del agente.
+   - Si existe integracion frontend, enviar `scopeCompanyIds` para enforcement estructurado.
+   - Para roles no-empresa, enviar `scopeAttributes` con las dimensiones aplicables.
 
 ## 8) Seguridad operativa
 

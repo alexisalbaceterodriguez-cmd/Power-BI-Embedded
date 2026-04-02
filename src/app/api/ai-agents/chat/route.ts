@@ -1,10 +1,62 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
-import { getAIAgentByIdForUser, recordAuditEvent } from '@/lib/dal';
+import { getAIAgentByIdForUser, getSecureReportConfigForUser, recordAuditEvent } from '@/lib/dal';
 import { chatWithFoundryAgent } from '@/services/foundryAgents';
 import { PowerBIServiceError } from '@/services/powerbi';
 
 export const runtime = 'nodejs';
+
+function normalizeForScopeCheck(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function extractCompanyIdsFromText(text: string): string[] {
+  const normalized = normalizeForScopeCheck(text);
+  const ids = new Set<string>();
+  const regex = /(?:empresa|compania|compa.{0,2}ia)\s*(?:n(?:umero|ro)?\.?\s*)?0*(\d{1,3})/g;
+
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(normalized)) !== null) {
+    const value = String(Number(match[1]));
+    if (value !== '0' && value !== 'NaN') {
+      ids.add(value);
+    }
+  }
+
+  return [...ids];
+}
+
+function extractAllowedCompanyIdsFromRoles(roles?: string[]): string[] {
+  if (!roles || roles.length === 0) return [];
+
+  const ids = new Set<string>();
+  for (const role of roles) {
+    const normalized = normalizeForScopeCheck(role);
+    const regex = /empresa\s*0*(\d{1,3})/g;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(normalized)) !== null) {
+      const value = String(Number(match[1]));
+      if (value !== '0' && value !== 'NaN') {
+        ids.add(value);
+      }
+    }
+  }
+
+  return [...ids];
+}
+
+function getLatestUserMessage(messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>): string {
+  const latestUser = [...messages].reverse().find((message) => message.role === 'user' && message.content.trim());
+  return latestUser?.content.trim() ?? '';
+}
+
+function listDisallowedCompanyIds(referencedCompanyIds: string[], allowedCompanyIds: string[]): string[] {
+  const allowed = new Set(allowedCompanyIds);
+  return referencedCompanyIds.filter((companyId) => !allowed.has(companyId));
+}
 
 function getClientIp(request: NextRequest): string | undefined {
   const forwarded = request.headers.get('x-forwarded-for');
@@ -28,6 +80,7 @@ export async function POST(request: NextRequest) {
     };
 
     const agentId = payload.agentId?.trim();
+    const requestedReportId = payload.reportId?.trim();
     if (!agentId) {
       return NextResponse.json({ error: 'Missing agentId' }, { status: 400 });
     }
@@ -37,11 +90,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing messages' }, { status: 400 });
     }
 
+    const latestUserMessage = getLatestUserMessage(messages);
+
     const agent = await getAIAgentByIdForUser({
       userId: session.user.id,
       role: session.user.role,
       agentId,
-      reportId: payload.reportId?.trim(),
+      reportId: requestedReportId,
     });
 
     if (!agent) {
@@ -49,19 +104,112 @@ export async function POST(request: NextRequest) {
         eventType: 'agent.chat.denied',
         userId: session.user.id,
         ip,
-        detail: { agentId, reportId: payload.reportId },
+        detail: { agentId, reportId: requestedReportId },
       });
 
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
+    let effectiveUserName = session.user.email ?? session.user.name ?? session.user.id;
+    let effectiveRlsRoles = session.user.rlsRoles;
+    let allowedCompanyIds: string[] = [];
+
+    if (agent.securityMode === 'rls-inherit') {
+      if (!requestedReportId) {
+        return NextResponse.json({ error: 'Missing reportId' }, { status: 400 });
+      }
+
+      const reportConfig = await getSecureReportConfigForUser({
+        userId: session.user.id,
+        role: session.user.role,
+        requestedReportId,
+      });
+
+      if (!reportConfig) {
+        await recordAuditEvent({
+          eventType: 'agent.chat.rls_denied',
+          userId: session.user.id,
+          ip,
+          detail: { agentId, reportId: requestedReportId, reason: 'report_access_denied' },
+        });
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+
+      const reportRlsRoles = reportConfig.rlsRoles && reportConfig.rlsRoles.length > 0 ? reportConfig.rlsRoles : undefined;
+
+      if (session.user.role === 'admin') {
+        const adminRlsRolesDefined = reportConfig.adminRlsRoles && reportConfig.adminRlsRoles.length > 0;
+        const roleSource = adminRlsRolesDefined ? reportConfig.adminRlsRoles : reportRlsRoles;
+        effectiveRlsRoles = roleSource && roleSource.length > 0 ? roleSource : undefined;
+        if (effectiveRlsRoles && effectiveRlsRoles.length > 0) {
+          effectiveUserName = reportConfig.adminRlsUsername ?? effectiveUserName;
+        }
+      } else if (reportRlsRoles && reportRlsRoles.length > 0) {
+        const userRlsRoles = session.user.rlsRoles ?? [];
+        const intersection = userRlsRoles.filter((role) => reportRlsRoles.includes(role));
+        if (intersection.length === 0) {
+          await recordAuditEvent({
+            eventType: 'agent.chat.rls_denied',
+            userId: session.user.id,
+            ip,
+            detail: { agentId, reportId: requestedReportId, reason: 'no_role_intersection' },
+          });
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+        effectiveRlsRoles = intersection;
+      }
+
+      allowedCompanyIds = extractAllowedCompanyIdsFromRoles(effectiveRlsRoles);
+      if (allowedCompanyIds.length > 0 && latestUserMessage) {
+        const referencedCompanyIds = extractCompanyIdsFromText(latestUserMessage);
+        const disallowedCompanyIds = listDisallowedCompanyIds(referencedCompanyIds, allowedCompanyIds);
+        if (disallowedCompanyIds.length > 0) {
+          await recordAuditEvent({
+            eventType: 'agent.chat.rls_denied',
+            userId: session.user.id,
+            ip,
+            detail: {
+              agentId,
+              reportId: requestedReportId,
+              reason: 'query_out_of_scope',
+              referencedCompanyIds,
+              allowedCompanyIds,
+              disallowedCompanyIds,
+            },
+          });
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
+      }
+    }
+
     const assistantText = await chatWithFoundryAgent({
       responsesEndpoint: agent.responsesEndpoint,
       securityMode: agent.securityMode,
-      userName: session.user.email ?? session.user.name ?? session.user.id,
-      rlsRoles: session.user.rlsRoles,
+      userName: effectiveUserName,
+      rlsRoles: effectiveRlsRoles,
       messages,
     });
+
+    if (agent.securityMode === 'rls-inherit' && allowedCompanyIds.length > 0) {
+      const referencedCompanyIds = extractCompanyIdsFromText(assistantText);
+      const disallowedCompanyIds = listDisallowedCompanyIds(referencedCompanyIds, allowedCompanyIds);
+      if (disallowedCompanyIds.length > 0) {
+        await recordAuditEvent({
+          eventType: 'agent.chat.rls_denied',
+          userId: session.user.id,
+          ip,
+          detail: {
+            agentId,
+            reportId: requestedReportId,
+            reason: 'response_out_of_scope',
+            referencedCompanyIds,
+            allowedCompanyIds,
+            disallowedCompanyIds,
+          },
+        });
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+    }
 
     await recordAuditEvent({
       eventType: 'agent.chat.success',
@@ -69,7 +217,7 @@ export async function POST(request: NextRequest) {
       ip,
       detail: {
         agentId,
-        reportId: payload.reportId,
+        reportId: requestedReportId,
         endpoint: agent.responsesEndpoint,
         securityMode: agent.securityMode,
       },

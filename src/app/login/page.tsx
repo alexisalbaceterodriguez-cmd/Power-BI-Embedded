@@ -1,21 +1,38 @@
 'use client';
 
-import { useState, Suspense } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { signIn } from 'next-auth/react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 
+const AUTH_ERROR_MESSAGES: Record<string, string> = {
+  AccessDenied: 'Acceso denegado. Tu cuenta no esta autorizada para acceder a esta plataforma.',
+  Configuration: 'Se detecto un problema de configuracion del inicio de sesion. Intentalo de nuevo en unos minutos.',
+  Verification: 'No se pudo verificar tu inicio de sesion. Vuelve a intentarlo.',
+  OAuthSignin: 'No se pudo iniciar la autenticacion con Microsoft. Intenta nuevamente.',
+  OAuthCallback: 'La respuesta de autenticacion no fue valida. Intenta iniciar sesion otra vez.',
+  Callback: 'No se pudo completar el proceso de inicio de sesion. Intenta nuevamente.',
+  SessionRequired: 'Tu sesion no es valida o ha expirado. Inicia sesion de nuevo.',
+};
+
+function getAuthErrorMessage(errorCode: string | null): string | null {
+  if (!errorCode) return null;
+  return AUTH_ERROR_MESSAGES[errorCode] ?? 'Se produjo un error durante el inicio de sesion. Intentalo nuevamente.';
+}
+
 function LoginContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const urlError = searchParams.get('error');
+  const urlErrorMessage = getAuthErrorMessage(urlError);
 
-  const [error, setError] = useState<string | null>(
-    urlError === 'AccessDenied' 
-      ? 'Acceso denegado. Tu cuenta no está autorizada para acceder a esta plataforma.' 
-      : null
-  );
+  const [error, setError] = useState<string | null>(urlErrorMessage);
   const [microsoftLoading, setMicrosoftLoading] = useState(false);
+  const [showRecoveryActions, setShowRecoveryActions] = useState(Boolean(urlError));
+
+  useEffect(() => {
+    setError(urlErrorMessage);
+    setShowRecoveryActions(Boolean(urlError));
+  }, [urlErrorMessage, urlError]);
 
   async function handleMicrosoftLogin() {
     setError(null);
@@ -47,15 +64,8 @@ function LoginContent() {
             {error}
           </div>
         )}
-        {urlError === 'AccessDenied' ? (
-          <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="logout-btn"
-              onClick={() => router.replace('/login')}
-            >
-              Volver
-            </button>
+        {urlError && showRecoveryActions ? (
+          <div style={{ marginBottom: '1rem' }}>
             <button
               type="button"
               className="login-btn"

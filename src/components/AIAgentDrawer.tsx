@@ -142,10 +142,11 @@ export default function AIAgentDrawer({ open, reportId, agents, scopeAttributes,
       if (!assistant || assistant.role !== 'assistant' || typeof assistant.content !== 'string') {
         throw new Error('Respuesta invalida del agente');
       }
+      const assistantContent: string = assistant.content;
 
       setMessages((prev) => [...prev, {
         role: 'assistant',
-        content: assistant.content,
+        content: assistantContent,
         timestamp: Date.now(),
       }]);
     } catch (err) {

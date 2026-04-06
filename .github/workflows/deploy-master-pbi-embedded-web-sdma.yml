@@ -1,0 +1,73 @@
+name: Build and deploy to Azure Web App (master)
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: webapp-pbi-embedded-web-sdma-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  WEBAPP_NAME: pbi-embedded-web-sdma
+  PACKAGE_PATH: ./deploy
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+
+      - name: Install dependencies and build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Prepare standalone artifact
+        run: |
+          rm -rf deploy
+          mkdir -p deploy/.next
+          cp -R .next/standalone/. deploy/
+          cp -R .next/static deploy/.next/static
+          if [ -d public ]; then
+            cp -R public deploy/public
+          fi
+
+      - name: Azure Login (Service Principal)
+        if: ${{ secrets.AZURE_CREDENTIALS != '' }}
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy with Service Principal
+        if: ${{ secrets.AZURE_CREDENTIALS != '' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.WEBAPP_NAME }}
+          slot-name: production
+          package: ${{ env.PACKAGE_PATH }}
+
+      - name: Deploy with Publish Profile
+        if: ${{ secrets.AZURE_CREDENTIALS == '' && secrets.AZURE_WEBAPP_PUBLISH_PROFILE != '' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.WEBAPP_NAME }}
+          slot-name: production
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ${{ env.PACKAGE_PATH }}
+
+      - name: Fail if deployment secret is missing
+        if: ${{ secrets.AZURE_CREDENTIALS == '' && secrets.AZURE_WEBAPP_PUBLISH_PROFILE == '' }}
+        run: |
+          echo "::error::Missing deployment secret. Configure AZURE_CREDENTIALS or AZURE_WEBAPP_PUBLISH_PROFILE in GitHub repository secrets."
+          exit 1

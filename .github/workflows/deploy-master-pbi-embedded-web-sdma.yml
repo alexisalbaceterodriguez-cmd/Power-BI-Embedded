@@ -13,6 +13,8 @@ concurrency:
 env:
   WEBAPP_NAME: pbi-embedded-web-sdma
   PACKAGE_PATH: ./deploy
+  AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+  AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
 
 jobs:
   build-and-deploy:
@@ -44,13 +46,13 @@ jobs:
           fi
 
       - name: Azure Login (Service Principal)
-        if: ${{ secrets.AZURE_CREDENTIALS != '' }}
+        if: ${{ env.AZURE_CREDENTIALS != '' }}
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          creds: ${{ env.AZURE_CREDENTIALS }}
 
       - name: Deploy with Service Principal
-        if: ${{ secrets.AZURE_CREDENTIALS != '' }}
+        if: ${{ env.AZURE_CREDENTIALS != '' }}
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.WEBAPP_NAME }}
@@ -58,16 +60,16 @@ jobs:
           package: ${{ env.PACKAGE_PATH }}
 
       - name: Deploy with Publish Profile
-        if: ${{ secrets.AZURE_CREDENTIALS == '' && secrets.AZURE_WEBAPP_PUBLISH_PROFILE != '' }}
+        if: ${{ env.AZURE_CREDENTIALS == '' && env.AZURE_WEBAPP_PUBLISH_PROFILE != '' }}
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ env.WEBAPP_NAME }}
           slot-name: production
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          publish-profile: ${{ env.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: ${{ env.PACKAGE_PATH }}
 
       - name: Fail if deployment secret is missing
-        if: ${{ secrets.AZURE_CREDENTIALS == '' && secrets.AZURE_WEBAPP_PUBLISH_PROFILE == '' }}
+        if: ${{ env.AZURE_CREDENTIALS == '' && env.AZURE_WEBAPP_PUBLISH_PROFILE == '' }}
         run: |
           echo "::error::Missing deployment secret. Configure AZURE_CREDENTIALS or AZURE_WEBAPP_PUBLISH_PROFILE in GitHub repository secrets."
           exit 1

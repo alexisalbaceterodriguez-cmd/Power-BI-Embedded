@@ -1,0 +1,19 @@
+name: pbi-embedded
+
+services:
+  web:
+    project: .
+    language: js
+    host: appservice
+
+infra:
+  provider: bicep
+  path: infra
+
+hooks:
+  postprovision:
+    shell: sh
+    run: |
+      echo "Infrastructure provisioned."
+      echo "Run 'npm run db:azure:init' to initialize the database schema."
+      echo "Run 'npm run db:azure:seed' to seed bootstrap data (first run only)."

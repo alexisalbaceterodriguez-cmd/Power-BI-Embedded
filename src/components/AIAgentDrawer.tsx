@@ -28,14 +28,19 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
 
-  const selectedAgent = useMemo(() => agents[0] ?? null, [agents]);
+  const selectedAgent = useMemo(
+    () => agents.find((a) => a.id === selectedAgentId) ?? agents[0] ?? null,
+    [agents, selectedAgentId]
+  );
 
   useEffect(() => {
     if (!open) return;
     setMessages([]);
     setInput('');
     setError(null);
+    setSelectedAgentId(agents[0]?.id ?? null);
   }, [open, reportId, agents]);
 
   async function sendMessage() {
@@ -86,12 +91,30 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
       <div className="ai-drawer-header">
         <div>
           <p className="ai-drawer-eyebrow">Agente</p>
-          <h3 className="ai-drawer-title">Asistente del informe</h3>
+          <h3 className="ai-drawer-title">{selectedAgent?.name ?? 'Asistente del informe'}</h3>
         </div>
         <button className="logout-btn" onClick={onClose}>
           Cerrar
         </button>
       </div>
+
+      {agents.length > 1 && (
+        <div className="ai-drawer-agent-picker">
+          <select
+            className="form-input"
+            value={selectedAgent?.id ?? ''}
+            onChange={(e) => {
+              setSelectedAgentId(e.target.value);
+              setMessages([]);
+              setError(null);
+            }}
+          >
+            {agents.map((agent) => (
+              <option key={agent.id} value={agent.id}>{agent.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {agents.length === 0 ? (
         <div className="ai-drawer-empty">No hay agentes disponibles para este informe.</div>

@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "mssql": "^11.0.1",
-    "next": "16.2.0",
+    "next": "^16.2.4",
     "next-auth": "^5.0.0-beta.30",
     "powerbi-client": "^2.23.10",
     "powerbi-client-react": "^2.0.2",

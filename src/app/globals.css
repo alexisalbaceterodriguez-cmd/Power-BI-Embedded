@@ -398,6 +398,14 @@ html, body {
   font-weight: 700;
 }
 
+.ai-drawer-agent-picker {
+  padding: 0 0.25rem;
+}
+
+.ai-drawer-agent-picker select {
+  width: 100%;
+}
+
 .ai-agent-select-wrap {
   display: flex;
   flex-direction: column;

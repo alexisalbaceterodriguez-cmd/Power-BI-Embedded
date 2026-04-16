@@ -43,6 +43,17 @@ declare module 'next-auth' {
   }
 }
 
+interface EnrichedToken {
+  id?: string;
+  role?: 'admin' | 'client';
+  clientId?: string;
+  reportIds?: string[];
+  rlsRoles?: string[];
+  name?: string | null;
+  email?: string | null;
+  [key: string]: unknown;
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     MicrosoftEntraId({
@@ -106,27 +117,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return true;
     },
     async jwt({ token, user }) {
+      const enriched = token as EnrichedToken;
       if (user) {
-        (token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] }).id = user.id;
-        (token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] }).role = user.role;
-        (token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] }).clientId = user.clientId;
-        (token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] }).reportIds = user.reportIds;
-        (token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] }).rlsRoles = user.rlsRoles;
+        enriched.id = user.id;
+        enriched.role = user.role;
+        enriched.clientId = user.clientId;
+        enriched.reportIds = user.reportIds;
+        enriched.rlsRoles = user.rlsRoles;
         token.name = user.name;
         token.email = user.email;
         return token;
       }
 
-      const enrichedToken = token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] };
-
-      if (enrichedToken.id) {
+      if (enriched.id) {
         try {
-          const currentUser = await getSessionUserById(enrichedToken.id);
+          const currentUser = await getSessionUserById(enriched.id);
           if (currentUser) {
-            enrichedToken.role = currentUser.role;
-            enrichedToken.clientId = currentUser.clientId;
-            enrichedToken.reportIds = currentUser.reportIds;
-            enrichedToken.rlsRoles = currentUser.rlsRoles;
+            enriched.role = currentUser.role;
+            enriched.clientId = currentUser.clientId;
+            enriched.reportIds = currentUser.reportIds;
+            enriched.rlsRoles = currentUser.rlsRoles;
             token.name = currentUser.name;
             token.email = currentUser.email;
           }
@@ -138,22 +148,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return token;
     },
     async session({ session, token }) {
-      const enrichedToken = token as typeof token & { id?: string; role?: 'admin' | 'client'; clientId?: string; reportIds?: string[]; rlsRoles?: string[] };
-      if (!enrichedToken.id || !enrichedToken.role) {
+      const enriched = token as EnrichedToken;
+      if (!enriched.id || !enriched.role) {
         return session;
       }
 
-      session.user.id = enrichedToken.id;
+      session.user.id = enriched.id;
       if (typeof token.name === 'string') {
         session.user.name = token.name;
       }
       if (typeof token.email === 'string') {
         session.user.email = token.email;
       }
-      session.user.role = enrichedToken.role;
-      session.user.clientId = enrichedToken.clientId;
-      session.user.reportIds = enrichedToken.reportIds ?? [];
-      session.user.rlsRoles = enrichedToken.rlsRoles;
+      session.user.role = enriched.role;
+      session.user.clientId = enriched.clientId;
+      session.user.reportIds = enriched.reportIds ?? [];
+      session.user.rlsRoles = enriched.rlsRoles;
       return session;
     },
   },

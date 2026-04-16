@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminSession } from '@/lib/authz';
 import { createUserFromAdmin, deleteUserFromAdmin, listUsersForAdmin, updateUserFromAdmin } from '@/lib/dal';
+import { splitCsv } from '@/lib/utils';
 
 export const runtime = 'nodejs';
-
-function splitCsv(value: string | undefined): string[] {
-  if (!value) return [];
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
 
 export async function POST(request: NextRequest) {
   const session = await requireAdminSession();

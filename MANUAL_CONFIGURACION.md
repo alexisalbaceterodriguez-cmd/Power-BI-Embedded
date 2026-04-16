@@ -1,100 +1,180 @@
-# Manual Operativo (Foundry-Only)
+# Manual Operativo
 
-Este manual describe la operacion de usuarios, reportes y agentes Azure AI Foundry.
+Este manual describe la operacion diaria de la plataforma: gestion de usuarios, reportes y agentes Azure AI Foundry, ademas del proceso de despliegue y troubleshooting.
 
-## 1) Alcance
+## 1. Alcance
 
 1. Gestion de usuarios y permisos de reportes.
 2. Configuracion RLS por usuario.
 3. Alta y mantenimiento de agentes IA Foundry.
-4. Troubleshooting y validaciones de produccion.
+4. Despliegue de la aplicacion (IaC Bicep + GitHub Actions).
+5. Troubleshooting y validaciones de produccion.
 
-Fuente de verdad: Azure SQL.
+Fuente de verdad: **Azure SQL** (base de datos `powerbiembedded`).
 
-## 2) Requisitos previos
+Tablas principales:
+
+| Tabla | Uso |
+|-------|-----|
+| `users` | Usuarios y roles |
+| `reports` | Informes Power BI |
+| `clients` | Clientes (agrupacion de usuarios e informes) |
+| `user_report_access` | Acceso de usuario a informe |
+| `user_rls_roles` | Roles RLS por usuario |
+| `ai_agents` | Agentes Azure AI Foundry |
+| `ai_agent_reports` | Vinculacion agente ↔ informe |
+| `audit_log` | Registro de eventos |
+
+## 2. Requisitos previos
 
 1. Aplicacion desplegada o en local (`npm run dev`).
-2. Login con usuario `admin`.
+2. Login con usuario de rol `admin`.
 3. Endpoint admin disponible en `/admin`.
 
-Tablas clave:
+## 3. Gestion de clientes
 
-- `users`
-- `reports`
-- `user_report_access`
-- `user_rls_roles`
-- `ai_agents`
-- `ai_agent_reports`
-- `audit_log`
+El panel `/admin` muestra la seccion **Clientes** en la parte superior.
 
-## 3) Gestion de usuarios
+1. Introducir `id` (slug, ej: `cliente-acme`) y `Nombre visible`.
+2. Pulsar **Crear cliente**.
+3. Para editar, clicar sobre la etiqueta del cliente existente.
 
-En `/admin` > pestaña `Usuarios`:
+Nota: el `id` de cliente no se puede cambiar tras la creacion (es clave foranea de usuarios e informes).
 
-1. Crear usuario con `username`, `email`, `role` y `cliente`.
-2. Asignar reportes autorizados.
-3. Definir `RLS roles` (csv) cuando aplique.
-4. Activar o desactivar usuario.
+## 4. Gestion de usuarios
 
-Validaciones:
+En `/admin` > pestaña **Usuarios** (componente `UserManager`):
 
-- El email debe corresponder a claims de Microsoft Entra ID.
-- Usuarios `client` solo deben tener reportes de su cliente.
+1. Completar `Nombre de usuario`, `Email` (debe coincidir con el claim Entra ID), `Rol` y `Cliente`.
+2. Seleccionar los informes a los que tendra acceso.
+3. Indicar `RLS roles` (separados por coma) si aplica.
+4. Establecer fecha de expiracion opcional.
+5. Guardar.
 
-## 4) Gestion de reportes
+Validaciones aplicadas:
 
-En `/admin` > pestaña `Informes`:
+- El email debe corresponder al claim principal o alternativo de Microsoft Entra ID.
+- Los informes asignados deben pertenecer al mismo cliente del usuario.
+- Usuarios `client` solo ven informes de su cliente.
+- Usuarios `admin` acceden a todos los informes.
 
-1. Definir `id`, `displayName`, `workspaceId`, `reportId`, `clientId`.
-2. Configurar `rlsRoles` y `adminRlsRoles` cuando corresponda.
-3. Activar/desactivar reporte.
+## 5. Gestion de informes
 
-## 5) Gestion de agentes Foundry
+En `/admin` > pestaña **Informes** (componente `ReportManager`):
 
-En `/admin` > pestaña `Agentes IA`:
+1. Definir `ID interno` (slug unico), `Nombre visible`, `Cliente`, `Workspace ID` y `Report ID`.
+2. Configurar `rlsRoles` (csv) para usuarios normales y `adminRlsRoles` para admins cuando aplique.
+3. `Admin RLS username`: nombre de usuario a pasar al token embed cuando el admin visualiza con RLS.
+4. Activar/desactivar informe.
 
-Campos del agente:
+Los `Workspace ID` y `Report ID` se obtienen desde la URL del informe en Power BI Service:
+`https://app.powerbi.com/groups/<workspaceId>/reports/<reportId>`
 
-1. `Nombre`.
-2. `Cliente`.
-3. `Responses Endpoint` de la aplicación publicada en Foundry.
-4. `Activity Endpoint` (opcional).
-5. `Proyecto Foundry` (opcional).
-6. `Nombre de agente Foundry` (opcional).
-7. `Version de agente` (opcional).
-8. `Modo de seguridad`:
-   - `Sin RLS`
-   - `RLS heredado del usuario`
-9. `Informes vinculados`.
+## 6. Gestion de agentes Foundry
 
-Nota:
+En `/admin` > pestaña **Agentes IA** (componente `AgentManager`):
 
-- En esta release, columnas legacy de Fabric quedan deprecadas en BD para compatibilidad temporal, pero no se usan en UI ni runtime.
+| Campo | Descripcion |
+|-------|------------|
+| Nombre | Nombre visible del agente |
+| Cliente | Cliente al que pertenece |
+| Responses Endpoint | URL de la app publicada en Foundry (`/protocols/openai/responses`) |
+| Activity Endpoint | Opcional — protocolo de actividad |
+| Proyecto Foundry | Nombre del proyecto en AI Foundry (referencia) |
+| Nombre de agente | Nombre de la app/agente en Foundry (referencia) |
+| Version | Version del agente (referencia) |
+| Modo de seguridad | `Sin RLS` o `RLS heredado del usuario` |
+| Informes vinculados | Informes en los que aparece el boton del agente |
+| Activo | Activar/desactivar el agente |
 
-## 6) Flujos de validacion
+Cuando hay **mas de un agente** vinculado a un informe, el panel de chat muestra un selector desplegable para elegir el agente activo.
 
-1. Verificar schema y migracion:
-   - `npm run db:azure:init`
-2. Seed inicial (solo entorno limpio):
-   - `npm run db:azure:seed`
-3. Validar salud de Foundry:
-   - `npm run foundry:health`
-4. Build de regresion:
-   - `npm run build`
+## 7. Despliegue
 
-## 7) Troubleshooting rapido
+### 7.1 Primer despliegue (nuevo entorno) — Azure Developer CLI
 
-1. `401/403` en chat Foundry:
-   - Revisar `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`.
-   - Revisar RBAC en recurso/proyecto Foundry.
-2. Usuario no ve informes:
-   - Revisar `user_report_access`, cliente y estado activo.
-3. Error de datos con RLS:
-   - Revisar `user_rls_roles` y modo de seguridad del agente.
+```bash
+# Instalar azd
+winget install microsoft.azd
 
-## 8) Seguridad operativa
+# Login
+azd auth login
 
-1. Guardar secretos en Key Vault.
-2. Rotar `AZURE_CLIENT_SECRET` y `NEXTAUTH_SECRET`.
-3. Activar logs y alertas sobre `audit_log` y errores de chat.
-4. Aplicar principio de minimo privilegio en roles de Azure.
+# Crear entorno y configurar secretos
+azd env new pbi-embedded-prod
+azd env set AZURE_TENANT_ID      "<tenant-id>"
+azd env set AZURE_CLIENT_ID      "<client-id>"
+azd env set AZURE_CLIENT_SECRET  "<client-secret>"
+azd env set NEXTAUTH_SECRET      "<random-32-chars>"
+azd env set SQL_ADMIN_LOGIN      "sqladmin"
+azd env set SQL_ADMIN_PASSWORD   "<password-seguro>"
+azd env set BOOTSTRAP_ADMIN_EMAIL "admin@empresa.com"
+
+# Provisionar infraestructura + desplegar codigo
+azd up
+```
+
+`azd up` ejecuta:
+1. `azd provision` — crea App Service, SQL, Key Vault, App Insights, Managed Identity.
+2. `azd deploy` — construye y sube el codigo al App Service.
+
+### 7.2 CI/CD automatico — GitHub Actions
+
+Cada push a `master` o `MVP-working` ejecuta el workflow en `.github/workflows/MVP-working_pbi-embedded-web-sdma.yml`:
+
+1. `npm ci` + `npm run build`
+2. Login con `AZURE_CREDENTIALS` (secret del repositorio)
+3. Deploy a App Service `pbi-embedded-web-sdma`
+
+El secret `AZURE_CREDENTIALS` debe ser un Service Principal con rol **Contributor** sobre el Resource Group:
+
+```bash
+az ad sp create-for-rbac \
+  --name "pbi-embedded-github" \
+  --role contributor \
+  --scopes /subscriptions/<sub>/resourceGroups/rg-powerbi-embedded-web \
+  --json-auth
+```
+
+Copiar el JSON resultante como secret `AZURE_CREDENTIALS` en el repositorio de GitHub.
+
+### 7.3 Inicializacion de base de datos (solo primera vez)
+
+```bash
+# Crear/migrar schema (idempotente)
+npm run db:azure:init
+
+# Seed de datos bootstrap (solo entorno limpio)
+npm run db:azure:seed
+```
+
+## 8. Flujos de validacion
+
+| Validacion | Comando |
+|-----------|---------|
+| Build completo | `npm run build` |
+| Lint | `npm run lint` |
+| Schema BD | `npm run db:azure:init` |
+| Seed BD (primera vez) | `npm run db:azure:seed` |
+| Salud agente Foundry | `npm run foundry:health` |
+| Invocacion Python | `npm run foundry:py:invoke` |
+
+## 9. Troubleshooting
+
+| Sintoma | Causa probable | Solucion |
+|---------|---------------|---------|
+| `AccessDenied` en login | Email no mapeado en `users` | Crear usuario en `/admin` con el email exacto del claim Entra ID |
+| `401/403` en chat Foundry | RBAC de la identidad sobre el recurso Foundry | Asignar rol `Azure AI Developer` a la MI/SP sobre el recurso |
+| Usuario no ve informes | `user_report_access` vacio o cliente incorrecto | Revisar en `/admin` > Usuarios > editar > asignar informes |
+| Error RLS en embed | `rlsRoles` vacio o nombre de rol incorrecto | Revisar roles en Power BI Dataset y en `/admin` > Usuarios |
+| Key Vault access denied | MI sin rol `Key Vault Secrets User` | El Bicep lo asigna automaticamente; re-provisionar si falta |
+| NEXTAUTH_URL incorrecto | URL de la app no coincide | Actualizar `NEXTAUTH_URL` en App Settings con la URL correcta |
+
+## 10. Seguridad operativa
+
+1. **Secretos en Key Vault** — nunca en variables de entorno directas en produccion.
+2. **Rotar periodicamente** `AZURE_CLIENT_SECRET` y `NEXTAUTH_SECRET`.
+3. **Managed Identity** — preferir MI sobre Service Principal para accesos a SQL y Foundry.
+4. **Audit log** — monitorizar la tabla `audit_log` para detectar accesos anomalos.
+5. **Application Insights** — configurar alertas sobre errores HTTP 5xx y tiempos de respuesta.
+6. **Minimo privilegio** — el Service Principal de GitHub Actions solo necesita rol `Contributor` sobre el RG.

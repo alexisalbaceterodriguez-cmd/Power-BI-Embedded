@@ -198,16 +198,9 @@ export async function chatWithFoundryAgent(params: {
 
   const token = await getFoundryApiToken();
 
-  // Build request body: send the user message clean, pass RLS context via instructions
-  // to avoid contaminating the Fabric Data Agent query with prefix metadata.
+  // Send the user message clean — the agent's system prompt configured in Foundry portal
+  // must not be overridden. Security is enforced at the application layer (route.ts gates).
   const requestBody: Record<string, unknown> = { input: userMessage };
-
-  if (params.securityMode === 'rls-inherit' && params.rlsRoles && params.rlsRoles.length > 0) {
-    const allowedCompanies = params.rlsRoles.join(', ');
-    requestBody.instructions =
-      `This user (${params.userName ?? 'unknown'}) has access only to data from: ${allowedCompanies}. ` +
-      `Only provide information for those companies. Do not reveal data from other companies.`;
-  }
 
   const response = await fetch(params.responsesEndpoint, {
     method: 'POST',

@@ -216,53 +216,38 @@ describe('Foundry auth mode selection', () => {
   });
 });
 
-// ── RLS request body construction ────────────────────────────────
+// ── Foundry request body construction ───────────────────────────
+// The Responses API 'instructions' field REPLACES the agent's configured system
+// prompt entirely. Security is enforced at the application layer (route.ts gates),
+// so the request body must always be a clean { input: userMessage }.
 
-describe('RLS request body construction', () => {
-  function buildFoundryRequestBody(
-    userMessage: string,
-    securityMode: 'none' | 'rls-inherit',
-    userName?: string,
-    rlsRoles?: string[]
-  ): Record<string, unknown> {
-    const body: Record<string, unknown> = { input: userMessage };
-    if (securityMode === 'rls-inherit' && rlsRoles && rlsRoles.length > 0) {
-      const allowedCompanies = rlsRoles.join(', ');
-      body.instructions =
-        `This user (${userName ?? 'unknown'}) has access only to data from: ${allowedCompanies}. ` +
-        `Only provide information for those companies. Do not reveal data from other companies.`;
-    }
-    return body;
+describe('Foundry request body construction', () => {
+  function buildFoundryRequestBody(userMessage: string): Record<string, unknown> {
+    return { input: userMessage };
   }
 
-  it('sends clean user message without RLS prefix in input', () => {
-    const body = buildFoundryRequestBody('dame el EBIT', 'rls-inherit', 'user@test.com', ['Empresa 02']);
-    expect(body.input).toBe('dame el EBIT');
-    expect(typeof body.input).toBe('string');
+  it('sends clean user message as input', () => {
+    const body = buildFoundryRequestBody('dame el EBIT de enero 2025');
+    expect(body.input).toBe('dame el EBIT de enero 2025');
+  });
+
+  it('does not include instructions field (would override agent system prompt)', () => {
+    const body = buildFoundryRequestBody('dame el budget para ventas');
+    expect(body.instructions).toBeUndefined();
+  });
+
+  it('does not include RLS prefix in input', () => {
+    const body = buildFoundryRequestBody('cual es el budget?');
     expect(String(body.input)).not.toContain('[RLS');
   });
 
-  it('adds instructions field for rls-inherit mode', () => {
-    const body = buildFoundryRequestBody('dame el EBIT', 'rls-inherit', 'user@test.com', ['Empresa 02']);
-    expect(typeof body.instructions).toBe('string');
-    expect(String(body.instructions)).toContain('Empresa 02');
-    expect(String(body.instructions)).toContain('user@test.com');
+  it('passes through generic questions without modification', () => {
+    const body = buildFoundryRequestBody('Cual es el budget para las ventas de productos?');
+    expect(body.input).toBe('Cual es el budget para las ventas de productos?');
   });
 
-  it('does not add instructions for none security mode', () => {
-    const body = buildFoundryRequestBody('dame el EBIT', 'none');
-    expect(body.instructions).toBeUndefined();
-    expect(body.input).toBe('dame el EBIT');
-  });
-
-  it('does not add instructions when rlsRoles is empty', () => {
-    const body = buildFoundryRequestBody('dame el EBIT', 'rls-inherit', 'user@test.com', []);
-    expect(body.instructions).toBeUndefined();
-  });
-
-  it('includes all companies in instructions when multiple roles', () => {
-    const body = buildFoundryRequestBody('dame ventas', 'rls-inherit', 'mgr@test.com', ['Empresa 01', 'Empresa 03']);
-    expect(String(body.instructions)).toContain('Empresa 01');
-    expect(String(body.instructions)).toContain('Empresa 03');
+  it('has exactly one key in the request body', () => {
+    const body = buildFoundryRequestBody('test question');
+    expect(Object.keys(body)).toEqual(['input']);
   });
 });

@@ -109,7 +109,7 @@ export async function getFoundryApiToken(): Promise<string> {
   const tenantId = process.env.AZURE_TENANT_ID?.trim();
   const clientId = process.env.AZURE_CLIENT_ID?.trim();
   const clientSecret = process.env.AZURE_CLIENT_SECRET?.trim();
-  const scope = process.env.FOUNDRY_API_SCOPE?.trim() || 'https://ai.azure.com/.default';
+  const scope = process.env.FOUNDRY_API_SCOPE?.trim() || 'https://api.fabric.microsoft.com/.default';
 
   if (!tenantId || !clientId || !clientSecret) {
     throw new PowerBIServiceError('Missing AZURE_* credentials for Foundry.', 'El servicio de agentes de datos no esta configurado.', 500);
@@ -160,8 +160,8 @@ async function getFoundryApiTokenFromAzureCli(): Promise<string | null> {
     const isWindows = process.platform === 'win32';
     const command = isWindows ? 'cmd.exe' : 'az';
     const commandArgs = isWindows
-      ? ['/d', '/s', '/c', 'az account get-access-token --resource https://ai.azure.com -o json']
-      : ['account', 'get-access-token', '--resource', 'https://ai.azure.com', '-o', 'json'];
+      ? ['/d', '/s', '/c', 'az account get-access-token --resource https://api.fabric.microsoft.com -o json']
+      : ['account', 'get-access-token', '--resource', 'https://api.fabric.microsoft.com', '-o', 'json'];
 
     const { stdout } = await execFileAsync(command, commandArgs, { timeout: 20_000 });
     const parsed = JSON.parse(stdout || '{}') as { accessToken?: string; expiresOn?: string };
@@ -178,6 +178,57 @@ async function getFoundryApiTokenFromAzureCli(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// ── MCP tool name cache (per-endpoint) ──
+const mcpToolNameCache = new Map<string, string>();
+
+async function discoverMcpToolName(endpoint: string, token: string): Promise<string> {
+  const cached = mcpToolNameCache.get(endpoint);
+  if (cached) return cached;
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 'discover', method: 'tools/list', params: {} }),
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    throw new PowerBIServiceError(
+      `MCP tools/list failed (${response.status}) on ${endpoint}`,
+      inferFoundryPublicMessageByStatus(response.status),
+      502
+    );
+  }
+
+  const data = (await response.json()) as { result?: { tools?: Array<{ name: string }> } };
+  const toolName = data.result?.tools?.[0]?.name;
+  if (!toolName) {
+    throw new PowerBIServiceError(
+      `MCP tools/list returned no tools for ${endpoint}`,
+      'No se encontro el agente de datos configurado.',
+      502
+    );
+  }
+
+  mcpToolNameCache.set(endpoint, toolName);
+  return toolName;
+}
+
+function extractMcpText(payload: unknown): string {
+  const record = payload as Record<string, unknown>;
+  const result = record.result as Record<string, unknown> | undefined;
+  if (!result) return 'No se recibio respuesta del agente.';
+
+  const content = Array.isArray(result.content) ? (result.content as Array<Record<string, unknown>>) : [];
+  for (const item of content) {
+    if (item.type === 'text' && typeof item.text === 'string' && item.text.trim()) {
+      return sanitizeAssistantText(item.text);
+    }
+  }
+
+  return 'No se recibio respuesta del agente.';
 }
 
 export async function chatWithFoundryAgent(params: {
@@ -197,10 +248,18 @@ export async function chatWithFoundryAgent(params: {
   }
 
   const token = await getFoundryApiToken();
+  const toolName = await discoverMcpToolName(params.responsesEndpoint, token);
 
-  // Send the user message clean — the agent's system prompt configured in Foundry portal
-  // must not be overridden. Security is enforced at the application layer (route.ts gates).
-  const requestBody: Record<string, unknown> = { input: userMessage };
+  // MCP JSON-RPC 2.0 tools/call — security is enforced at the application layer (route.ts gates).
+  const requestBody = {
+    jsonrpc: '2.0',
+    id: `chat-${Date.now()}`,
+    method: 'tools/call',
+    params: {
+      name: toolName,
+      arguments: { userQuestion: userMessage },
+    },
+  };
 
   const response = await fetch(params.responsesEndpoint, {
     method: 'POST',
@@ -215,7 +274,7 @@ export async function chatWithFoundryAgent(params: {
   const rawBody = (await safeText(response)) ?? '';
   if (!response.ok) {
     throw new PowerBIServiceError(
-      `Foundry responses failed (${response.status}) on ${params.responsesEndpoint}: ${rawBody}`,
+      `MCP tools/call failed (${response.status}) on ${params.responsesEndpoint}: ${rawBody}`,
       inferFoundryPublicMessageByStatus(response.status),
       502
     );
@@ -223,8 +282,29 @@ export async function chatWithFoundryAgent(params: {
 
   try {
     const payload = JSON.parse(rawBody) as Record<string, unknown>;
-    return extractAssistantText(payload);
-  } catch {
+
+    // Check for MCP-level errors
+    if (payload.error) {
+      const err = payload.error as Record<string, unknown>;
+      throw new PowerBIServiceError(
+        `MCP error: ${JSON.stringify(err)}`,
+        'El agente de datos devolvio un error al procesar la consulta.',
+        502
+      );
+    }
+
+    const result = payload.result as Record<string, unknown> | undefined;
+    if (result?.isError === true) {
+      throw new PowerBIServiceError(
+        `MCP tool error: ${JSON.stringify(result)}`,
+        'El agente de datos no pudo procesar la consulta.',
+        502
+      );
+    }
+
+    return extractMcpText(payload);
+  } catch (err) {
+    if (err instanceof PowerBIServiceError) throw err;
     return sanitizeAssistantText(rawBody || 'No se recibio respuesta del agente.');
   }
 }

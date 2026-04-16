@@ -1,7 +1,7 @@
 /**
- * Unit tests for Azure AI Foundry service helper functions.
+ * Unit tests for Fabric Data Agent MCP service helper functions.
  *
- * Tests the pure functions: sanitizeAssistantText, extractAssistantText,
+ * Tests the pure functions: sanitizeAssistantText, extractMcpText,
  * latestUserQuestion, inferFoundryPublicMessageByStatus, token mode selection.
  *
  * These are replicated from foundryAgents.ts (module-private functions).
@@ -25,33 +25,15 @@ function latestUserQuestion(
   return latestUser ? latestUser.content.trim() : null;
 }
 
-function extractAssistantText(payload: unknown): string {
+function extractMcpText(payload: unknown): string {
   const record = payload as Record<string, unknown>;
+  const result = record.result as Record<string, unknown> | undefined;
+  if (!result) return 'No se recibio respuesta del agente.';
 
-  if (typeof record.output_text === 'string' && record.output_text.trim()) {
-    return sanitizeAssistantText(record.output_text);
-  }
-
-  const output = Array.isArray(record.output) ? (record.output as Array<Record<string, unknown>>) : [];
-  const messageItem = output.find((item) => item.type === 'message');
-  if (messageItem) {
-    const content = Array.isArray(messageItem.content) ? (messageItem.content as Array<Record<string, unknown>>) : [];
-    for (const fragment of content) {
-      if (typeof fragment.text === 'string' && fragment.text.trim()) {
-        return sanitizeAssistantText(fragment.text);
-      }
-    }
-  }
-
-  const choices = Array.isArray(record.choices) ? (record.choices as Array<Record<string, unknown>>) : [];
-  if (choices[0]) {
-    const first = choices[0];
-    const message = first.message as Record<string, unknown> | undefined;
-    if (message && typeof message.content === 'string' && message.content.trim()) {
-      return sanitizeAssistantText(message.content);
-    }
-    if (typeof first.text === 'string' && first.text.trim()) {
-      return sanitizeAssistantText(first.text);
+  const content = Array.isArray(result.content) ? (result.content as Array<Record<string, unknown>>) : [];
+  for (const item of content) {
+    if (item.type === 'text' && typeof item.text === 'string' && item.text.trim()) {
+      return sanitizeAssistantText(item.text);
     }
   }
 
@@ -120,50 +102,48 @@ describe('latestUserQuestion', () => {
   });
 });
 
-// ── extractAssistantText ──────────────────────────────────────────
+// ── extractMcpText ────────────────────────────────────────────────
 
-describe('extractAssistantText', () => {
-  it('extracts from output_text (Responses API format)', () => {
-    const payload = { output_text: 'Hello world 【1:0†source】' };
-    expect(extractAssistantText(payload)).toBe('Hello world');
-  });
-
-  it('extracts from output[].message.content (streaming format)', () => {
+describe('extractMcpText', () => {
+  it('extracts text from MCP result content', () => {
     const payload = {
-      output: [
-        {
-          type: 'message',
-          content: [{ type: 'output_text', text: 'Streamed result' }],
-        },
-      ],
+      result: { content: [{ type: 'text', text: 'El total de ventas es 1000 euros.' }], isError: false },
+      id: '1',
+      jsonrpc: '2.0',
     };
-    expect(extractAssistantText(payload)).toBe('Streamed result');
+    expect(extractMcpText(payload)).toBe('El total de ventas es 1000 euros.');
   });
 
-  it('extracts from choices[].message.content (OpenAI compat)', () => {
+  it('sanitizes source annotations in MCP text', () => {
     const payload = {
-      choices: [{ message: { content: 'OpenAI format' } }],
+      result: { content: [{ type: 'text', text: 'Resultado 【4:0†source】 final.' }], isError: false },
+      id: '1',
+      jsonrpc: '2.0',
     };
-    expect(extractAssistantText(payload)).toBe('OpenAI format');
+    expect(extractMcpText(payload)).toBe('Resultado final.');
   });
 
-  it('extracts from choices[].text (legacy format)', () => {
+  it('returns fallback when result is missing', () => {
+    expect(extractMcpText({})).toBe('No se recibio respuesta del agente.');
+  });
+
+  it('returns fallback when content array is empty', () => {
+    const payload = { result: { content: [], isError: false }, id: '1', jsonrpc: '2.0' };
+    expect(extractMcpText(payload)).toBe('No se recibio respuesta del agente.');
+  });
+
+  it('returns fallback when text is whitespace-only', () => {
+    const payload = { result: { content: [{ type: 'text', text: '   ' }], isError: false }, id: '1', jsonrpc: '2.0' };
+    expect(extractMcpText(payload)).toBe('No se recibio respuesta del agente.');
+  });
+
+  it('extracts first text item when multiple content items exist', () => {
     const payload = {
-      choices: [{ text: 'Legacy text' }],
+      result: { content: [{ type: 'text', text: 'First answer' }, { type: 'text', text: 'Second' }], isError: false },
+      id: '1',
+      jsonrpc: '2.0',
     };
-    expect(extractAssistantText(payload)).toBe('Legacy text');
-  });
-
-  it('returns fallback when no text found', () => {
-    expect(extractAssistantText({})).toBe('No se recibio respuesta del agente.');
-  });
-
-  it('prefers output_text over other formats', () => {
-    const payload = {
-      output_text: 'Primary',
-      choices: [{ message: { content: 'Secondary' } }],
-    };
-    expect(extractAssistantText(payload)).toBe('Primary');
+    expect(extractMcpText(payload)).toBe('First answer');
   });
 });
 
@@ -216,38 +196,49 @@ describe('Foundry auth mode selection', () => {
   });
 });
 
-// ── Foundry request body construction ───────────────────────────
-// The Responses API 'instructions' field REPLACES the agent's configured system
-// prompt entirely. Security is enforced at the application layer (route.ts gates),
-// so the request body must always be a clean { input: userMessage }.
+// ── MCP request body construction ───────────────────────────────
+// The Fabric Data Agent MCP protocol uses JSON-RPC 2.0 with tools/call.
+// Security is enforced at the application layer (route.ts gates).
 
-describe('Foundry request body construction', () => {
-  function buildFoundryRequestBody(userMessage: string): Record<string, unknown> {
-    return { input: userMessage };
+describe('MCP request body construction', () => {
+  function buildMcpRequestBody(userMessage: string, toolName: string): Record<string, unknown> {
+    return {
+      jsonrpc: '2.0',
+      id: `chat-${Date.now()}`,
+      method: 'tools/call',
+      params: {
+        name: toolName,
+        arguments: { userQuestion: userMessage },
+      },
+    };
   }
 
-  it('sends clean user message as input', () => {
-    const body = buildFoundryRequestBody('dame el EBIT de enero 2025');
-    expect(body.input).toBe('dame el EBIT de enero 2025');
+  it('uses JSON-RPC 2.0 protocol', () => {
+    const body = buildMcpRequestBody('dame el EBIT', 'DataAgent_agent_sales');
+    expect(body.jsonrpc).toBe('2.0');
   });
 
-  it('does not include instructions field (would override agent system prompt)', () => {
-    const body = buildFoundryRequestBody('dame el budget para ventas');
-    expect(body.instructions).toBeUndefined();
+  it('calls tools/call method', () => {
+    const body = buildMcpRequestBody('dame el EBIT', 'DataAgent_agent_sales');
+    expect(body.method).toBe('tools/call');
   });
 
-  it('does not include RLS prefix in input', () => {
-    const body = buildFoundryRequestBody('cual es el budget?');
-    expect(String(body.input)).not.toContain('[RLS');
+  it('passes userQuestion in tool arguments', () => {
+    const body = buildMcpRequestBody('Cual es el budget?', 'DataAgent_agent_sales');
+    const params = body.params as Record<string, unknown>;
+    const args = params.arguments as Record<string, unknown>;
+    expect(args.userQuestion).toBe('Cual es el budget?');
   });
 
-  it('passes through generic questions without modification', () => {
-    const body = buildFoundryRequestBody('Cual es el budget para las ventas de productos?');
-    expect(body.input).toBe('Cual es el budget para las ventas de productos?');
+  it('passes tool name in params', () => {
+    const body = buildMcpRequestBody('test', 'DataAgent_agent_finance');
+    const params = body.params as Record<string, unknown>;
+    expect(params.name).toBe('DataAgent_agent_finance');
   });
 
-  it('has exactly one key in the request body', () => {
-    const body = buildFoundryRequestBody('test question');
-    expect(Object.keys(body)).toEqual(['input']);
+  it('does not include RLS context in the request', () => {
+    const body = buildMcpRequestBody('test', 'DataAgent_agent_sales');
+    expect(JSON.stringify(body)).not.toContain('instructions');
+    expect(JSON.stringify(body)).not.toContain('RLS');
   });
 });

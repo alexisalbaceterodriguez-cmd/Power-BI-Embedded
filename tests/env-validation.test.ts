@@ -71,6 +71,7 @@ describe('.env files consistency', () => {
   });
 
   it('.env.local exists', () => {
+    if (process.env.CI) return; // .env.local is gitignored, not present in CI
     expect(existsSync(join(root, '.env.local'))).toBe(true);
   });
 

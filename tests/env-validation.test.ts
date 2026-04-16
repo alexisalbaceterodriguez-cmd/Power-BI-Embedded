@@ -85,7 +85,11 @@ describe('.env files consistency', () => {
     expect(missing, `Missing from .env.example: ${missing.join(', ')}`).toEqual([]);
   });
 
+  // .env.local is gitignored and not present in CI — skip these checks in CI
+  const runLocalTests = !process.env.CI;
+
   it('.env.local only contains runtime vars (no orphan provisioning vars)', () => {
+    if (!runLocalTests) return;
     const local = parseEnvFile(join(root, '.env.local'));
     const allowed = new Set([...RUNTIME_VARS, ...OPTIONAL_VARS]);
     const orphans: string[] = [];
@@ -96,6 +100,7 @@ describe('.env files consistency', () => {
   });
 
   it('.env.local has all required runtime vars', () => {
+    if (!runLocalTests) return;
     const local = parseEnvFile(join(root, '.env.local'));
     const missing: string[] = [];
     for (const v of RUNTIME_VARS) {

@@ -11,7 +11,7 @@ function toAgentConfig(row: DbAIAgent, reportIds: string[]): AIAgentConfig {
     id: row.id,
     name: row.name,
     clientId: row.client_id,
-    responsesEndpoint: (row.responses_endpoint ?? row.published_url ?? '').trim(),
+    responsesEndpoint: (row.responses_endpoint ?? '').trim(),
     activityEndpoint: row.activity_endpoint ?? undefined,
     foundryProject: row.foundry_project ?? undefined,
     foundryAgentName: row.foundry_agent_name ?? undefined,
@@ -28,7 +28,7 @@ export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
 
   const rows = await queryRows<DbAIAgent>(
     `SELECT id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version,
-            security_mode, migration_status, published_url, mcp_url, mcp_tool_name, is_active
+            security_mode, migration_status, is_active
      FROM ai_agents
      ORDER BY name ASC`
   );
@@ -58,8 +58,8 @@ export async function createAIAgentFromAdmin(input: CreateAIAgentInput): Promise
   const agentId = randomUUID();
   await queryRows(
     `INSERT INTO ai_agents
-      (id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version, security_mode, migration_status, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
-     VALUES (@id, @name, @client_id, @responses_endpoint, @activity_endpoint, @foundry_project, @foundry_agent_name, @foundry_agent_version, @security_mode, @migration_status, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`,
+      (id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version, security_mode, migration_status, published_url, is_active, created_at, updated_at)
+     VALUES (@id, @name, @client_id, @responses_endpoint, @activity_endpoint, @foundry_project, @foundry_agent_name, @foundry_agent_version, @security_mode, @migration_status, @responses_endpoint, @is_active, @created_at, @updated_at)`,
     (request) => {
       request.input('id', sql.NVarChar(64), agentId);
       request.input('name', sql.NVarChar(256), input.name.trim());
@@ -71,9 +71,6 @@ export async function createAIAgentFromAdmin(input: CreateAIAgentInput): Promise
       request.input('foundry_agent_version', sql.NVarChar(64), input.foundryAgentVersion?.trim() || null);
       request.input('security_mode', sql.NVarChar(32), input.securityMode ?? 'none');
       request.input('migration_status', sql.NVarChar(32), input.migrationStatus ?? 'manual');
-      request.input('published_url', sql.NVarChar(1024), input.responsesEndpoint.trim());
-      request.input('mcp_url', sql.NVarChar(1024), null);
-      request.input('mcp_tool_name', sql.NVarChar(256), null);
       request.input('is_active', sql.Bit, toBit(input.isActive !== false));
       request.input('created_at', sql.DateTime2, nowIso());
       request.input('updated_at', sql.DateTime2, nowIso());
@@ -118,9 +115,7 @@ export async function updateAIAgentFromAdmin(input: UpdateAIAgentInput): Promise
          foundry_agent_version = @foundry_agent_version,
          security_mode = @security_mode,
          migration_status = @migration_status,
-         published_url = @published_url,
-         mcp_url = @mcp_url,
-         mcp_tool_name = @mcp_tool_name,
+         published_url = @responses_endpoint,
          is_active = @is_active,
          updated_at = @updated_at
      WHERE id = @id`,
@@ -135,9 +130,6 @@ export async function updateAIAgentFromAdmin(input: UpdateAIAgentInput): Promise
       request.input('foundry_agent_version', sql.NVarChar(64), input.foundryAgentVersion?.trim() || null);
       request.input('security_mode', sql.NVarChar(32), input.securityMode ?? 'none');
       request.input('migration_status', sql.NVarChar(32), input.migrationStatus ?? 'manual');
-      request.input('published_url', sql.NVarChar(1024), input.responsesEndpoint.trim());
-      request.input('mcp_url', sql.NVarChar(1024), null);
-      request.input('mcp_tool_name', sql.NVarChar(256), null);
       request.input('is_active', sql.Bit, toBit(input.isActive !== false));
       request.input('updated_at', sql.DateTime2, nowIso());
     }
@@ -203,7 +195,7 @@ export async function getAIAgentsForReport(params: {
 
   const rows = await queryRows<DbAIAgent>(
     `SELECT a.id, a.name, a.client_id, a.responses_endpoint, a.activity_endpoint, a.foundry_project, a.foundry_agent_name, a.foundry_agent_version,
-            a.security_mode, a.migration_status, a.published_url, a.mcp_url, a.mcp_tool_name, a.is_active
+            a.security_mode, a.migration_status, a.is_active
      FROM ai_agents a
      INNER JOIN ai_agent_reports ar ON ar.agent_id = a.id
      INNER JOIN reports r ON r.id = ar.report_id
@@ -225,7 +217,7 @@ export async function getAIAgentByIdForUser(params: {
 
   const agent = await queryOne<DbAIAgent>(
     `SELECT TOP (1) id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version,
-            security_mode, migration_status, published_url, mcp_url, mcp_tool_name, is_active
+            security_mode, migration_status, is_active
      FROM ai_agents
      WHERE id = @agentId AND is_active = 1`,
     (request) => request.input('agentId', sql.NVarChar(64), params.agentId)

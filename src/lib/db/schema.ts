@@ -21,7 +21,7 @@ BEGIN
     id NVARCHAR(64) NOT NULL PRIMARY KEY,
     username NVARCHAR(128) NOT NULL UNIQUE,
     email NVARCHAR(256) NULL UNIQUE,
-    password_hash NVARCHAR(512) NULL,
+    password_hash NVARCHAR(512) NULL,        -- deprecated: auth is Entra-only, never populated
     role NVARCHAR(16) NOT NULL,
     is_active BIT NOT NULL DEFAULT 1,
     expires_at DATETIME2 NULL,
@@ -91,9 +91,9 @@ BEGIN
     foundry_agent_version NVARCHAR(64) NULL,
     security_mode NVARCHAR(32) NOT NULL DEFAULT 'none',
     migration_status NVARCHAR(32) NOT NULL DEFAULT 'legacy',
-    published_url NVARCHAR(1024) NOT NULL,
-    mcp_url NVARCHAR(1024) NULL,
-    mcp_tool_name NVARCHAR(256) NULL,
+    published_url NVARCHAR(1024) NOT NULL,   -- deprecated: use responses_endpoint instead
+    mcp_url NVARCHAR(1024) NULL,              -- deprecated: MCP support removed
+    mcp_tool_name NVARCHAR(256) NULL,         -- deprecated: MCP support removed
     is_active BIT NOT NULL DEFAULT 1,
     created_at DATETIME2 NOT NULL,
     updated_at DATETIME2 NOT NULL

@@ -50,17 +50,13 @@ function cachedAzureToken(): string | null {
   return azureTokenCache.token;
 }
 
-function readAzureEnv(primary: string, legacy: string): string | undefined {
-  return process.env[primary]?.trim() || process.env[legacy]?.trim() || undefined;
-}
-
 async function getAzureToken(): Promise<string> {
   const cached = cachedAzureToken();
   if (cached) return cached;
 
-  const tenantId = readAzureEnv('AZURE_TENANT_ID', 'TENANT_ID');
-  const clientId = readAzureEnv('AZURE_CLIENT_ID', 'CLIENT_ID');
-  const clientSecret = readAzureEnv('AZURE_CLIENT_SECRET', 'CLIENT_SECRET');
+  const tenantId = process.env.AZURE_TENANT_ID?.trim();
+  const clientId = process.env.AZURE_CLIENT_ID?.trim();
+  const clientSecret = process.env.AZURE_CLIENT_SECRET?.trim();
 
   if (!tenantId || !clientId || !clientSecret) {
     throw new PowerBIServiceError(

@@ -39,8 +39,5 @@ export interface DbAIAgent {
   foundry_agent_version: string | null;
   security_mode: 'none' | 'rls-inherit' | null;
   migration_status: 'migrated' | 'legacy' | 'manual' | null;
-  published_url: string;
-  mcp_url: string | null;
-  mcp_tool_name: string | null;
   is_active: boolean | number;
 }

@@ -13,17 +13,6 @@ function getBootstrapReports(): CreateReportInput[] {
     }
   }
 
-  if (process.env.WORKSPACE_ID && process.env.REPORT_ID) {
-    return [{
-      id: 'default-report',
-      displayName: 'Default Report',
-      clientId: 'cliente-1',
-      workspaceId: process.env.WORKSPACE_ID,
-      reportId: process.env.REPORT_ID,
-      isActive: true,
-    }];
-  }
-
   return [];
 }
 
@@ -191,23 +180,6 @@ export async function backfillDefaultClientsAndAssignments(): Promise<void> {
      WHERE responses_endpoint IS NULL OR migration_status IS NULL OR security_mode IS NULL`
   );
 
-  const forcedFoundryEndpoint =
-    process.env.AZURE_FOUNDRY_RESPONSES_ENDPOINT?.trim() ||
-    process.env.FOUNDRY_RESPONSES_ENDPOINT?.trim() ||
-    '';
-
-  if (forcedFoundryEndpoint) {
-    await queryRows(
-      `UPDATE ai_agents
-       SET responses_endpoint = @responses_endpoint,
-           published_url = @responses_endpoint,
-           migration_status = 'migrated'
-       WHERE migration_status = 'legacy'`,
-      (request) => {
-        request.input('responses_endpoint', sql.NVarChar(2048), forcedFoundryEndpoint);
-      }
-    );
-  }
 }
 
 export async function seedBootstrapData(): Promise<void> {
@@ -341,8 +313,8 @@ export async function seedBootstrapData(): Promise<void> {
     const agentClientId = normalizeClientId(agent.clientId) ?? 'cliente-1';
     await queryRows(
       `INSERT INTO ai_agents
-        (id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version, security_mode, migration_status, published_url, mcp_url, mcp_tool_name, is_active, created_at, updated_at)
-       VALUES (@id, @name, @client_id, @responses_endpoint, @activity_endpoint, @foundry_project, @foundry_agent_name, @foundry_agent_version, @security_mode, @migration_status, @published_url, @mcp_url, @mcp_tool_name, @is_active, @created_at, @updated_at)`,
+        (id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version, security_mode, migration_status, published_url, is_active, created_at, updated_at)
+       VALUES (@id, @name, @client_id, @responses_endpoint, @activity_endpoint, @foundry_project, @foundry_agent_name, @foundry_agent_version, @security_mode, @migration_status, @published_url, @is_active, @created_at, @updated_at)`,
       (request) => {
         request.input('id', sql.NVarChar(64), agentId);
         request.input('name', sql.NVarChar(256), agent.name);
@@ -355,8 +327,6 @@ export async function seedBootstrapData(): Promise<void> {
         request.input('security_mode', sql.NVarChar(32), agent.securityMode ?? 'none');
         request.input('migration_status', sql.NVarChar(32), agent.migrationStatus ?? 'manual');
         request.input('published_url', sql.NVarChar(1024), agent.responsesEndpoint.trim());
-        request.input('mcp_url', sql.NVarChar(1024), null);
-        request.input('mcp_tool_name', sql.NVarChar(256), null);
         request.input('is_active', sql.Bit, toBit(agent.isActive !== false));
         request.input('created_at', sql.DateTime2, nowIso());
         request.input('updated_at', sql.DateTime2, nowIso());

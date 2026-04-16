@@ -4,7 +4,7 @@
  *        isFutureDate, parseJsonArray, toBit, toBoolean, normalizeIdList.
  */
 import { describe, it, expect } from 'vitest';
-import { splitCsv } from '@/lib/utils';
+import { splitCsv } from '../../src/lib/utils';
 
 /**
  * We can't import pool.ts directly because it has `import 'server-only'`

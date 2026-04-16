@@ -6,7 +6,7 @@
  * but we test the pure logic pieces and env var handling.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { PowerBIServiceError } from '@/services/powerbi';
+import { PowerBIServiceError } from '../../src/services/powerbi';
 
 // ── PowerBIServiceError ─────────────────────────────────────────────
 

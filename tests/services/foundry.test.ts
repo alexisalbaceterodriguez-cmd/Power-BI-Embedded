@@ -215,3 +215,54 @@ describe('Foundry auth mode selection', () => {
     expect(mode === 'azure-cli' || mode === 'azcli').toBe(false);
   });
 });
+
+// ── RLS request body construction ────────────────────────────────
+
+describe('RLS request body construction', () => {
+  function buildFoundryRequestBody(
+    userMessage: string,
+    securityMode: 'none' | 'rls-inherit',
+    userName?: string,
+    rlsRoles?: string[]
+  ): Record<string, unknown> {
+    const body: Record<string, unknown> = { input: userMessage };
+    if (securityMode === 'rls-inherit' && rlsRoles && rlsRoles.length > 0) {
+      const allowedCompanies = rlsRoles.join(', ');
+      body.instructions =
+        `This user (${userName ?? 'unknown'}) has access only to data from: ${allowedCompanies}. ` +
+        `Only provide information for those companies. Do not reveal data from other companies.`;
+    }
+    return body;
+  }
+
+  it('sends clean user message without RLS prefix in input', () => {
+    const body = buildFoundryRequestBody('dame el EBIT', 'rls-inherit', 'user@test.com', ['Empresa 02']);
+    expect(body.input).toBe('dame el EBIT');
+    expect(typeof body.input).toBe('string');
+    expect(String(body.input)).not.toContain('[RLS');
+  });
+
+  it('adds instructions field for rls-inherit mode', () => {
+    const body = buildFoundryRequestBody('dame el EBIT', 'rls-inherit', 'user@test.com', ['Empresa 02']);
+    expect(typeof body.instructions).toBe('string');
+    expect(String(body.instructions)).toContain('Empresa 02');
+    expect(String(body.instructions)).toContain('user@test.com');
+  });
+
+  it('does not add instructions for none security mode', () => {
+    const body = buildFoundryRequestBody('dame el EBIT', 'none');
+    expect(body.instructions).toBeUndefined();
+    expect(body.input).toBe('dame el EBIT');
+  });
+
+  it('does not add instructions when rlsRoles is empty', () => {
+    const body = buildFoundryRequestBody('dame el EBIT', 'rls-inherit', 'user@test.com', []);
+    expect(body.instructions).toBeUndefined();
+  });
+
+  it('includes all companies in instructions when multiple roles', () => {
+    const body = buildFoundryRequestBody('dame ventas', 'rls-inherit', 'mgr@test.com', ['Empresa 01', 'Empresa 03']);
+    expect(String(body.instructions)).toContain('Empresa 01');
+    expect(String(body.instructions)).toContain('Empresa 03');
+  });
+});

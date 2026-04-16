@@ -197,10 +197,17 @@ export async function chatWithFoundryAgent(params: {
   }
 
   const token = await getFoundryApiToken();
-  const inputText =
-    params.securityMode === 'rls-inherit' && params.rlsRoles && params.rlsRoles.length > 0
-      ? `[RLS user=${params.userName ?? 'unknown'} roles=${params.rlsRoles.join(',')}] ${userMessage}`
-      : userMessage;
+
+  // Build request body: send the user message clean, pass RLS context via instructions
+  // to avoid contaminating the Fabric Data Agent query with prefix metadata.
+  const requestBody: Record<string, unknown> = { input: userMessage };
+
+  if (params.securityMode === 'rls-inherit' && params.rlsRoles && params.rlsRoles.length > 0) {
+    const allowedCompanies = params.rlsRoles.join(', ');
+    requestBody.instructions =
+      `This user (${params.userName ?? 'unknown'}) has access only to data from: ${allowedCompanies}. ` +
+      `Only provide information for those companies. Do not reveal data from other companies.`;
+  }
 
   const response = await fetch(params.responsesEndpoint, {
     method: 'POST',
@@ -208,7 +215,7 @@ export async function chatWithFoundryAgent(params: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ input: inputText }),
+    body: JSON.stringify(requestBody),
     cache: 'no-store',
   });
 

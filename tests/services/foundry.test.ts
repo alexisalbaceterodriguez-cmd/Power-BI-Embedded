@@ -201,17 +201,17 @@ describe('inferFoundryPublicMessageByStatus', () => {
 
 describe('Foundry auth mode selection', () => {
   it('recognizes azure-cli mode', () => {
-    const mode = 'azure-cli';
+    const mode: string = 'azure-cli';
     expect(mode === 'azure-cli' || mode === 'azcli').toBe(true);
   });
 
   it('recognizes azcli alias', () => {
-    const mode = 'azcli';
+    const mode: string = 'azcli';
     expect(mode === 'azure-cli' || mode === 'azcli').toBe(true);
   });
 
   it('falls back to service principal for other modes', () => {
-    const mode = 'azure-default';
+    const mode: string = 'azure-default';
     expect(mode === 'azure-cli' || mode === 'azcli').toBe(false);
   });
 });

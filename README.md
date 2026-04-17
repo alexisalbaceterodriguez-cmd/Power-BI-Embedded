@@ -1,6 +1,6 @@
-# Power BI Embedded + Azure AI Foundry
+# Power BI Embedded + Fabric Data Agents
 
-Portal Next.js 16 multi-cliente para embebido de informes Power BI con chat integrado de agentes Azure AI Foundry.
+Portal Next.js 16 multi-cliente para embebido de informes Power BI con chat integrado de Fabric Data Agents (MCP).
 
 ## Stack
 
@@ -8,9 +8,9 @@ Portal Next.js 16 multi-cliente para embebido de informes Power BI con chat inte
 |------|-----------|
 | Framework | Next.js 16 (App Router, React 19, TypeScript) |
 | Auth | Auth.js v5 + Microsoft Entra ID (JWT, sesion 1h) |
-| Estilos | Tailwind CSS 4 |
+| Estilos | Vanilla CSS — `globals.css` con custom properties (~1200 lineas); Tailwind v4 instalado pero sin usar |
 | Base de datos | Azure SQL via `mssql` (sin ORM, schema auto-migrante) |
-| IA | Azure AI Foundry — Responses API |
+| IA | Fabric Data Agents — MCP JSON-RPC 2.0 sobre HTTPS |
 | Hosting | Azure App Service (Linux, Node 20 LTS) |
 | CI/CD | GitHub Actions (`.github/workflows/`) |
 | IaC | Bicep + Azure Developer CLI (`infra/`) |
@@ -30,14 +30,14 @@ Portal Next.js 16 multi-cliente para embebido de informes Power BI con chat inte
 │  /api/reports     Listado de informes del usuario   │
 │  /api/get-embed-token  Token Power BI (RLS)         │
 │  /api/ai-agents        Listado de agentes           │
-│  /api/ai-agents/chat   Chat con Foundry             │
+│  /api/ai-agents/chat   Chat con Data Agent (MCP)    │
 │  /api/admin/*     CRUD admin (users/reports/agents) │
 └─────────────────────────────────────────────────────┘
           │                        │
           ▼                        ▼
-   Azure SQL                Azure AI Foundry
-   (users, reports,         (Responses API,
-    agents, audit)           Activity Protocol)
+   Azure SQL                Fabric Data Agents
+   (users, reports,         (MCP JSON-RPC 2.0;
+    agents, audit)           OBO token o SP fallback)
 ```
 
 ### Flujo de autenticacion y autorizacion
@@ -47,6 +47,7 @@ Portal Next.js 16 multi-cliente para embebido de informes Power BI con chat inte
 3. El JWT de sesion incluye `role`, `clientId`, `reportIds` y `rlsRoles`.
 4. Los API routes validan el JWT antes de cada operacion (`authz.ts`).
 5. El token de embed de Power BI se genera server-side con RLS estricto.
+6. En chat: el access token del usuario se intercambia via **OBO** por un token con scope Fabric (`DataAgent.Execute.All`). El admin consent fue otorgado el 17/04/2026; si el intercambio falla por cualquier otro motivo, se usa como fallback el token de Service Principal.
 
 ### Estructura de la capa de datos (DAL)
 
@@ -214,3 +215,7 @@ az webapp deploy --resource-group rg-powerbi-embedded-web \
 ## Nota sobre columnas legacy
 
 Los campos `mcp_*` de la tabla `ai_agents` estan deprecados pero no eliminados para compatibilidad con datos existentes. No se usan en UI ni runtime. Su borrado fisico se realizara en una migracion controlada futura.
+
+## Nota sobre admin consent
+
+Los permisos delegados `DataAgent.Execute.All` y `SemanticModel.Execute.All` tienen admin consent otorgado (17/04/2026). El flujo OBO esta activo: los usuarios que inicien sesion recibiran un access token con los scopes Fabric, que se usa como assertion en el intercambio OBO hacia el Data Agent.

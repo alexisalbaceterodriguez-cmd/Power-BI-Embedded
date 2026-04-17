@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
+import { getToken } from 'next-auth/jwt';
 import { getAIAgentByIdForUser, getSecureReportConfigForUser, recordAuditEvent } from '@/lib/dal';
 import { chatWithFoundryAgent } from '@/services/foundryAgents';
 import { PowerBIServiceError } from '@/services/powerbi';
@@ -71,6 +72,19 @@ export async function POST(request: NextRequest) {
   }
 
   const ip = getClientIp(request);
+
+  let userAccessToken: string | undefined;
+  try {
+    const secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+    if (secret) {
+      const jwtToken = await getToken({ req: request, secret });
+      // Use the id_token for OBO — its audience is our client_id.
+      // The access_token audience is graph.microsoft.com and fails OBO signature validation.
+      userAccessToken = typeof jwtToken?.idToken === 'string' ? jwtToken.idToken : undefined;
+    }
+  } catch {
+    // If JWT decoding fails, proceed without the user access token — OBO will be skipped.
+  }
 
   try {
     const payload = (await request.json()) as {
@@ -188,6 +202,7 @@ export async function POST(request: NextRequest) {
       userName: effectiveUserName,
       rlsRoles: effectiveRlsRoles,
       messages,
+      userAccessToken,
     });
 
     if (agent.securityMode === 'rls-inherit' && allowedCompanyIds.length > 0) {

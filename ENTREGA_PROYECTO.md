@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Portal Power BI Embedded multi-cliente con autenticacion Microsoft Entra ID, chat IA integrado via Azure AI Foundry y administracion completa desde un panel web.
+Portal Power BI Embedded multi-cliente con autenticacion Microsoft Entra ID, chat IA integrado via Fabric Data Agents (MCP) y administracion completa desde un panel web.
 
 ## Funcionalidades entregadas
 
@@ -21,12 +21,15 @@ Portal Power BI Embedded multi-cliente con autenticacion Microsoft Entra ID, cha
 - Validaciones de integridad (informes pertenecen al mismo cliente, emails de Entra ID, etc.).
 - Asignacion de roles RLS por usuario.
 
-### Chat con agentes Azure AI Foundry
+### Chat con Fabric Data Agents
 
 - Chat integrado en el dashboard junto al informe Power BI.
 - Selector de agente cuando hay multiples agentes disponibles para un informe.
-- Comunicacion server-side (API route) con token de aplicacion hacia Foundry Responses API.
+- Comunicacion server-side (API route) con el agente via **MCP JSON-RPC 2.0** sobre HTTPS.
+- Flujo **OBO (On-Behalf-Of)**: el token del usuario se intercambia por un token con scope Fabric para que el agente se autentique como el usuario real. Si el intercambio falla (p.ej. token de sesion caducado), la llamada cae a token de Service Principal como fallback.
+- Permisos delegados registrados en Entra ID: `DataAgent.Execute.All` y `SemanticModel.Execute.All` (admin consent otorgado).
 - Modo de seguridad `rls-inherit` para pasar contexto de usuario al agente.
+- Panel de chat completamente rediseñado: historial persistente por agente, indicador de pensando con tiempo transcurrido, timestamps en cada mensaje, atajo Enter-to-send y estado de bienvenida.
 
 ### Seguridad
 
@@ -90,15 +93,22 @@ El fichero monolito `dalAzureRuntime.ts` (~1500 lineas) ha sido refactorizado en
 
 ### Otras mejoras
 
-- `EnrichedToken` interface en `auth.ts` elimina 5 castings verbosos.
+- `EnrichedToken` interface en `auth.ts` elimina 5 castings verbosos; incluye `accessToken`, `refreshToken` y `accessTokenExpires` para el flujo OBO.
 - Helper `splitCsv` extraido a `src/lib/utils.ts` (antes duplicado en 3 ficheros).
 - Eliminados `wrangler.json` y directorio `src/config/` vacios.
 - Selector multi-agente en `AIAgentDrawer` (antes fijo en `agents[0]`).
+- `getToken` en `/api/ai-agents/chat/route.ts` envuelto en try/catch propio con secret explicito (`NEXTAUTH_SECRET`) para evitar crash `MissingSecret` cuando el entorno no tiene `AUTH_SECRET`.
+
+### Modernizacion de UI
+
+- `AIAgentDrawer.tsx` reescrito con historial de chat por agente (`historyMap`), componente `ThinkingIndicator` con puntos animados y contador de tiempo transcurrido, timestamps en cada burbuja, auto-scroll, auto-focus, Enter-to-send (Shift+Enter para salto de linea) y estado de bienvenida cuando no hay mensajes.
+- CSS completamente modernizado: glassmorphism en header, sidebar y drawer (backdrop-filter), animaciones de entrada, burbujas con animacion `bubbleIn`, scrollbar personalizado, boton de envio con gradiente, `.login-btn` con sombra y efecto hover lift, `.header-ai-btn` con borde de color, avatares con bordes redondeados y gradiente.
+- La capa de estilos es **Vanilla CSS** con custom properties en `globals.css` (~1200 lineas); Tailwind v4 esta instalado pero no se usa.
 
 ## Pendientes operativos (fuera de codigo)
 
 1. Rotar secretos historicos y almacenarlos en Key Vault.
-2. Asignar rol `Azure AI Developer` a la Managed Identity sobre el recurso Foundry para eliminar la dependencia del Service Principal en produccion.
+2. ~~Obtener admin consent para `DataAgent.Execute.All` y `SemanticModel.Execute.All`~~ **Completado** — consent otorgado el 17/04/2026. OBO activado.
 3. Configurar alertas en Application Insights sobre errores 5xx y latencia.
 4. Borrado fisico de columnas `mcp_*` en `ai_agents` en una migracion controlada futura.
 5. Migrar autenticacion de GitHub Actions de `AZURE_CREDENTIALS` (SP) a OIDC federated credentials.

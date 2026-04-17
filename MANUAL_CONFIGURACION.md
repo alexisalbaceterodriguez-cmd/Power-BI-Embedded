@@ -78,11 +78,11 @@ En `/admin` > pestaña **Agentes IA** (componente `AgentManager`):
 |-------|------------|
 | Nombre | Nombre visible del agente |
 | Cliente | Cliente al que pertenece |
-| Responses Endpoint | URL de la app publicada en Foundry (`/protocols/openai/responses`) |
-| Activity Endpoint | Opcional — protocolo de actividad |
-| Proyecto Foundry | Nombre del proyecto en AI Foundry (referencia) |
-| Nombre de agente | Nombre de la app/agente en Foundry (referencia) |
-| Version | Version del agente (referencia) |
+| MCP Endpoint | URL del Fabric Data Agent en formato `https://api.fabric.microsoft.com/v1/mcp/workspaces/<wsId>/dataagents/<agentId>/agent` |
+| Activity Endpoint | Opcional — protocolo de actividad alternativo |
+| Proyecto Foundry | Nombre del proyecto en AI Foundry (referencia documental) |
+| Nombre de agente | Nombre de la app/agente en Foundry (referencia documental) |
+| Version | Version del agente (referencia documental) |
 | Modo de seguridad | `Sin RLS` o `RLS heredado del usuario` |
 | Informes vinculados | Informes en los que aparece el boton del agente |
 | Activo | Activar/desactivar el agente |
@@ -156,7 +156,7 @@ npm run db:azure:seed
 | Lint | `npm run lint` |
 | Schema BD | `npm run db:azure:init` |
 | Seed BD (primera vez) | `npm run db:azure:seed` |
-| Salud agente Foundry | `npm run foundry:health` |
+| Salud agente Fabric | `npm run foundry:health` |
 | Invocacion Python | `npm run foundry:py:invoke` |
 
 ## 9. Troubleshooting
@@ -164,17 +164,21 @@ npm run db:azure:seed
 | Sintoma | Causa probable | Solucion |
 |---------|---------------|---------|
 | `AccessDenied` en login | Email no mapeado en `users` | Crear usuario en `/admin` con el email exacto del claim Entra ID |
-| `401/403` en chat Foundry | RBAC de la identidad sobre el recurso Foundry | Asignar rol `Azure AI Developer` a la MI/SP sobre el recurso |
+| `401/403` en chat con agente | RBAC o token incorrecto | Verificar que el SP tiene acceso al workspace Fabric; si el OBO falla por falta de consent, el fallback SP debe tener permisos |
+| Chat responde con error generico | OBO fallback activo (token sin scopes Fabric) | El usuario debe re-iniciar sesion para obtener un token con los scopes Fabric activados |
+| Chat responde con error generico | SP fallback falla con Fabric Data Agent | Verificar que `FOUNDRY_AUTH_MODE=sp` y que el SP tiene permisos sobre el workspace Fabric |
 | Usuario no ve informes | `user_report_access` vacio o cliente incorrecto | Revisar en `/admin` > Usuarios > editar > asignar informes |
 | Error RLS en embed | `rlsRoles` vacio o nombre de rol incorrecto | Revisar roles en Power BI Dataset y en `/admin` > Usuarios |
 | Key Vault access denied | MI sin rol `Key Vault Secrets User` | El Bicep lo asigna automaticamente; re-provisionar si falta |
 | NEXTAUTH_URL incorrecto | URL de la app no coincide | Actualizar `NEXTAUTH_URL` en App Settings con la URL correcta |
+| `Unexpected end of JSON input` en chat | `NEXTAUTH_SECRET` no configurado | Verificar que la variable `NEXTAUTH_SECRET` (no `AUTH_SECRET`) esta en App Settings |
 
 ## 10. Seguridad operativa
 
 1. **Secretos en Key Vault** — nunca en variables de entorno directas en produccion.
 2. **Rotar periodicamente** `AZURE_CLIENT_SECRET` y `NEXTAUTH_SECRET`.
-3. **Managed Identity** — preferir MI sobre Service Principal para accesos a SQL y Foundry.
+3. **Managed Identity** — preferir MI sobre Service Principal para accesos a SQL y Fabric.
 4. **Audit log** — monitorizar la tabla `audit_log` para detectar accesos anomalos.
 5. **Application Insights** — configurar alertas sobre errores HTTP 5xx y tiempos de respuesta.
 6. **Minimo privilegio** — el Service Principal de GitHub Actions solo necesita rol `Contributor` sobre el RG.
+7. **Admin consent otorgado** (17/04/2026) — los permisos delegados `DataAgent.Execute.All` y `SemanticModel.Execute.All` estan activos. El flujo OBO esta habilitado: los usuarios autenticados actuan como ellos mismos ante el Data Agent.

@@ -51,6 +51,10 @@ interface EnrichedToken {
   rlsRoles?: string[];
   name?: string | null;
   email?: string | null;
+  accessToken?: string;
+  idToken?: string;
+  refreshToken?: string;
+  accessTokenExpires?: number;
   [key: string]: unknown;
 }
 
@@ -84,16 +88,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         typeof profileRecord.unique_name === 'string' ? profileRecord.unique_name : undefined,
       ].filter((value): value is string => Boolean(value && value.trim()));
 
-      if (claimCandidates.length === 0) return false;
+      console.log('[auth] signIn claimCandidates:', claimCandidates);
+
+      if (claimCandidates.length === 0) {
+        console.warn('[auth] signIn DENIED: no claim candidates extracted from profile', JSON.stringify(profileRecord));
+        return false;
+      }
 
       let mappedUser = null;
       try {
         mappedUser = await findUserByMicrosoftClaims(claimCandidates);
-      } catch {
+      } catch (err) {
+        console.error('[auth] signIn DENIED: DB lookup failed', err);
         return false;
       }
 
       if (!mappedUser) {
+        console.warn('[auth] signIn DENIED: no user found for claims', claimCandidates);
         await safeAuditEvent({
           eventType: 'auth.microsoft.denied',
           detail: { claimCandidates },
@@ -116,7 +127,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       });
       return true;
     },
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       const enriched = token as EnrichedToken;
       if (user) {
         enriched.id = user.id;
@@ -126,10 +137,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         enriched.rlsRoles = user.rlsRoles;
         token.name = user.name;
         token.email = user.email;
-        return token;
+      }
+      if (account) {
+        enriched.accessToken = account.access_token;
+        enriched.idToken = account.id_token;
+        enriched.refreshToken = account.refresh_token;
+        enriched.accessTokenExpires = account.expires_at ? account.expires_at * 1000 : Date.now() + 3600_000;
       }
 
-      if (enriched.id) {
+      if (enriched.id && !user) {
         try {
           const currentUser = await getSessionUserById(enriched.id);
           if (currentUser) {
@@ -142,6 +158,41 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           }
         } catch {
           // Keep existing token values to avoid breaking /api/auth/session JSON response.
+        }
+      }
+
+      // Refresh the access token if it's expired (or about to expire in 5 min).
+      if (enriched.accessTokenExpires && Date.now() > enriched.accessTokenExpires - 5 * 60_000) {
+        if (enriched.refreshToken) {
+          try {
+            const tenantId = process.env.AZURE_TENANT_ID?.trim();
+            const clientId = (process.env.AUTH_MICROSOFT_ENTRA_ID_ID ?? process.env.AZURE_CLIENT_ID)?.trim();
+            const clientSecret = (process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET ?? process.env.AZURE_CLIENT_SECRET)?.trim();
+            if (tenantId && clientId && clientSecret) {
+              const params = new URLSearchParams({
+                client_id: clientId,
+                client_secret: clientSecret,
+                grant_type: 'refresh_token',
+                refresh_token: enriched.refreshToken,
+                scope: 'openid profile email offline_access',
+              });
+              const resp = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params.toString(),
+              });
+              if (resp.ok) {
+                const data = (await resp.json()) as { access_token?: string; refresh_token?: string; expires_in?: number };
+                if (data.access_token) {
+                  enriched.accessToken = data.access_token;
+                  enriched.accessTokenExpires = Date.now() + (data.expires_in ?? 3600) * 1000;
+                  if (data.refresh_token) enriched.refreshToken = data.refresh_token;
+                }
+              }
+            }
+          } catch {
+            // If refresh fails, keep stale token — OBO will fall back to SP token.
+          }
         }
       }
 

@@ -152,6 +152,49 @@ export async function getFoundryApiToken(): Promise<string> {
   return data.access_token;
 }
 
+// ── OBO: exchange user's Entra ID access token for a Fabric-scoped token ──
+async function exchangeTokenViaOBO(userAccessToken: string): Promise<string> {
+  const tenantId = process.env.AZURE_TENANT_ID?.trim();
+  const clientId = (process.env.AUTH_MICROSOFT_ENTRA_ID_ID ?? process.env.AZURE_CLIENT_ID)?.trim();
+  const clientSecret = (process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET ?? process.env.AZURE_CLIENT_SECRET)?.trim();
+
+  if (!tenantId || !clientId || !clientSecret) {
+    throw new PowerBIServiceError('Missing credentials for OBO token exchange.', 'No se pudo autenticar el servicio de agentes de datos.', 500);
+  }
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+    assertion: userAccessToken,
+    scope: 'https://api.fabric.microsoft.com/.default',
+    requested_token_use: 'on_behalf_of',
+  });
+
+  const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    const payload = await safeJson(response);
+    throw new PowerBIServiceError(
+      `OBO token exchange failed (${response.status}): ${JSON.stringify(payload)}`,
+      'No se pudo obtener un token delegado para el agente de datos.',
+      502
+    );
+  }
+
+  const data = (await response.json()) as { access_token?: string };
+  if (!data.access_token) {
+    throw new PowerBIServiceError('OBO token exchange returned no access_token.', 'No se pudo obtener un token delegado para el agente de datos.', 502);
+  }
+
+  return data.access_token;
+}
+
 async function getFoundryApiTokenFromAzureCli(): Promise<string | null> {
   const cached = cachedFoundryToken('azure-cli');
   if (cached) return cached;
@@ -237,6 +280,7 @@ export async function chatWithFoundryAgent(params: {
   userName?: string;
   rlsRoles?: string[];
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  userAccessToken?: string;
 }): Promise<string> {
   const userMessage = latestUserQuestion(params.messages);
   if (!userMessage) {
@@ -247,7 +291,19 @@ export async function chatWithFoundryAgent(params: {
     );
   }
 
-  const token = await getFoundryApiToken();
+  // Prefer OBO (user token → Fabric token), fall back to SP / azure-cli token.
+  let token: string;
+  if (params.userAccessToken) {
+    try {
+      token = await exchangeTokenViaOBO(params.userAccessToken);
+    } catch (oboError) {
+      console.warn('[foundryAgents] OBO exchange failed, falling back to SP token:', oboError instanceof Error ? oboError.message : oboError);
+      token = await getFoundryApiToken();
+    }
+  } else {
+    token = await getFoundryApiToken();
+  }
+
   const toolName = await discoverMcpToolName(params.responsesEndpoint, token);
 
   // MCP JSON-RPC 2.0 tools/call — security is enforced at the application layer (route.ts gates).

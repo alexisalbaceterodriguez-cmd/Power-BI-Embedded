@@ -6,7 +6,7 @@
 - Sin formulario de usuario/contrasena local.
 - Mapeo de usuario por email/claims de Entra ID contra tabla `users` en Azure SQL.
 - Panel de administracion en `/admin` para gestion de clientes, usuarios, informes y agentes IA.
-- Chat IA integrado con Azure AI Foundry (Responses API), con selector de agente cuando hay multiples disponibles.
+- Chat IA integrado con **Fabric Data Agents** via MCP JSON-RPC 2.0. Autenticacion con flujo OBO (usuario real) con fallback a Service Principal si el admin consent no esta otorgado.
 
 ---
 
@@ -18,7 +18,11 @@
    - En local: `http://localhost:3000/api/auth/callback/microsoft-entra-id`
 4. Anotar `Application (client) ID` y `Directory (tenant) ID`.
 5. En **Certificates & secrets** → crear un client secret. Anotar el valor.
-6. En **API permissions** → agregar `User.Read` (Microsoft Graph, delegado).
+6. En **API permissions** → agregar los siguientes permisos:
+   - `User.Read` (Microsoft Graph, delegado) — para login OIDC.
+   - `DataAgent.Execute.All` (Microsoft Fabric, delegado) — para OBO hacia Fabric Data Agents.
+   - `SemanticModel.Execute.All` (Microsoft Fabric, delegado) — para OBO hacia modelos semanticos.
+7. Pulsar **Grant admin consent** para los tres permisos (requiere rol Global Admin o Application Admin en el tenant).
 
 ---
 
@@ -34,6 +38,7 @@ AUTH_MICROSOFT_ENTRA_ID_ID="<client-id>"
 AUTH_MICROSOFT_ENTRA_ID_SECRET="<client-secret>"
 AUTH_MICROSOFT_ENTRA_ID_ISSUER="https://login.microsoftonline.com/<tenant-id>/v2.0"
 
+# IMPORTANTE: la variable debe llamarse NEXTAUTH_SECRET (no AUTH_SECRET)
 NEXTAUTH_SECRET="<string-aleatoria-32-caracteres>"
 NEXTAUTH_URL="http://localhost:3000"
 
@@ -130,7 +135,7 @@ azd up
 # Inicializar schema (apuntar las env vars al servidor recien creado)
 npm run db:azure:init
 
-# Validar conectividad con el agente Foundry
+# Validar conectividad con el Fabric Data Agent
 npm run foundry:health
 ```
 
@@ -164,7 +169,8 @@ Copiar el JSON como secret `AZURE_CREDENTIALS` en **Settings > Secrets > Actions
 | Login con usuario mapeado | Acceso al dashboard con sus informes |
 | Login con usuario no mapeado | Pantalla `AccessDenied` |
 | `/admin` con rol `client` | Redireccion o `403` |
-| Chat con agente Foundry | Respuesta en el drawer lateral |
+| Chat con agente (OBO activo) | Respuesta del agente autenticada como el usuario |
+| Chat con agente (token antiguo sin scopes Fabric) | Respuesta via fallback SP; re-login para activar OBO |
 | Selector de agente (>1 agente) | Dropdown visible en el drawer |
 | Embed de informe con RLS | Datos filtrados segun `rlsRoles` del usuario |
 

@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
     agents: agents.map((agent) => ({
       id: agent.id,
       name: agent.name,
+      agentType: agent.agentType,
       responsesEndpoint: agent.responsesEndpoint,
       securityMode: agent.securityMode,
       migrationStatus: agent.migrationStatus,

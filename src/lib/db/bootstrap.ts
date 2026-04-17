@@ -91,6 +91,7 @@ function getBootstrapAIAgents(): CreateAIAgentInput[] {
 
       output.push({
         name: typeof entry.name === 'string' ? entry.name : 'foundry-agent',
+        agentType: entry.agentType === 'foundry-responses' ? 'foundry-responses' : 'fabric-mcp',
         clientId: typeof entry.clientId === 'string' ? entry.clientId : 'cliente-1',
         responsesEndpoint,
         activityEndpoint: typeof entry.activityEndpoint === 'string' ? entry.activityEndpoint : undefined,

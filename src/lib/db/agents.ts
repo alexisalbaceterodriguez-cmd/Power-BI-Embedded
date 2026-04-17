@@ -6,10 +6,31 @@ import { ensureDataLayer } from '@/lib/db/schema';
 import { ensureClientExists } from '@/lib/db/clients';
 import { validateReportIdsBelongToClient } from '@/lib/db/reports';
 
+// Cache whether the agent_type column exists — avoids failing queries when migration is pending.
+let _hasAgentTypeCol: boolean | null = null;
+
+async function hasAgentTypeColumn(): Promise<boolean> {
+  if (_hasAgentTypeCol !== null) return _hasAgentTypeCol;
+  const r = await queryOne<{ col_len: number | null }>(
+    "SELECT COL_LENGTH('dbo.ai_agents', 'agent_type') AS col_len"
+  );
+  _hasAgentTypeCol = r?.col_len != null;
+  return _hasAgentTypeCol;
+}
+
+function agentTypeSql(alias?: string): string {
+  // When the column exists, select it; otherwise default to 'fabric-mcp'.
+  const prefix = alias ? `${alias}.` : '';
+  return _hasAgentTypeCol
+    ? `${prefix}agent_type`
+    : `'fabric-mcp' AS agent_type`;
+}
+
 function toAgentConfig(row: DbAIAgent, reportIds: string[]): AIAgentConfig {
   return {
     id: row.id,
     name: row.name,
+    agentType: row.agent_type === 'foundry-responses' ? 'foundry-responses' : 'fabric-mcp',
     clientId: row.client_id,
     responsesEndpoint: (row.responses_endpoint ?? '').trim(),
     activityEndpoint: row.activity_endpoint ?? undefined,
@@ -25,9 +46,10 @@ function toAgentConfig(row: DbAIAgent, reportIds: string[]): AIAgentConfig {
 
 export async function listAIAgentsForAdmin(): Promise<AIAgentConfig[]> {
   await ensureDataLayer();
+  await hasAgentTypeColumn();
 
   const rows = await queryRows<DbAIAgent>(
-    `SELECT id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version,
+    `SELECT id, name, ${agentTypeSql()}, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version,
             security_mode, migration_status, is_active
      FROM ai_agents
      ORDER BY name ASC`
@@ -51,18 +73,24 @@ export async function createAIAgentFromAdmin(input: CreateAIAgentInput): Promise
   await ensureDataLayer();
   const clientId = await ensureClientExists(input.clientId);
   if (!input.name.trim()) throw new Error('Agent name is required.');
-  if (!input.responsesEndpoint.trim()) throw new Error('Foundry responses endpoint is required.');
+  if (!input.responsesEndpoint.trim()) throw new Error('Agent endpoint is required.');
   if (input.reportIds.length === 0) throw new Error('At least one report must be associated.');
   await validateReportIdsBelongToClient(input.reportIds, clientId);
 
   const agentId = randomUUID();
+  const hasCol = await hasAgentTypeColumn();
+  const insertCols = hasCol
+    ? 'id, name, agent_type, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version, security_mode, migration_status, published_url, is_active, created_at, updated_at'
+    : 'id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version, security_mode, migration_status, published_url, is_active, created_at, updated_at';
+  const insertVals = hasCol
+    ? '@id, @name, @agent_type, @client_id, @responses_endpoint, @activity_endpoint, @foundry_project, @foundry_agent_name, @foundry_agent_version, @security_mode, @migration_status, @responses_endpoint, @is_active, @created_at, @updated_at'
+    : '@id, @name, @client_id, @responses_endpoint, @activity_endpoint, @foundry_project, @foundry_agent_name, @foundry_agent_version, @security_mode, @migration_status, @responses_endpoint, @is_active, @created_at, @updated_at';
   await queryRows(
-    `INSERT INTO ai_agents
-      (id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version, security_mode, migration_status, published_url, is_active, created_at, updated_at)
-     VALUES (@id, @name, @client_id, @responses_endpoint, @activity_endpoint, @foundry_project, @foundry_agent_name, @foundry_agent_version, @security_mode, @migration_status, @responses_endpoint, @is_active, @created_at, @updated_at)`,
+    `INSERT INTO ai_agents (${insertCols}) VALUES (${insertVals})`,
     (request) => {
       request.input('id', sql.NVarChar(64), agentId);
       request.input('name', sql.NVarChar(256), input.name.trim());
+      if (hasCol) request.input('agent_type', sql.NVarChar(32), input.agentType ?? 'fabric-mcp');
       request.input('client_id', sql.NVarChar(128), clientId);
       request.input('responses_endpoint', sql.NVarChar(2048), input.responsesEndpoint.trim());
       request.input('activity_endpoint', sql.NVarChar(2048), input.activityEndpoint?.trim() || null);
@@ -100,13 +128,16 @@ export async function updateAIAgentFromAdmin(input: UpdateAIAgentInput): Promise
   if (!agentId) throw new Error('Agent id is required.');
   const clientId = await ensureClientExists(input.clientId);
   if (!input.name.trim()) throw new Error('Agent name is required.');
-  if (!input.responsesEndpoint.trim()) throw new Error('Foundry responses endpoint is required.');
+  if (!input.responsesEndpoint.trim()) throw new Error('Agent endpoint is required.');
   if (input.reportIds.length === 0) throw new Error('At least one report must be associated.');
   await validateReportIdsBelongToClient(input.reportIds, clientId);
 
+  const hasCol = await hasAgentTypeColumn();
+  const agentTypeSet = hasCol ? 'agent_type = @agent_type,' : '';
   await queryRows(
     `UPDATE ai_agents
      SET name = @name,
+         ${agentTypeSet}
          client_id = @client_id,
          responses_endpoint = @responses_endpoint,
          activity_endpoint = @activity_endpoint,
@@ -122,6 +153,7 @@ export async function updateAIAgentFromAdmin(input: UpdateAIAgentInput): Promise
     (request) => {
       request.input('id', sql.NVarChar(64), agentId);
       request.input('name', sql.NVarChar(256), input.name.trim());
+      if (hasCol) request.input('agent_type', sql.NVarChar(32), input.agentType ?? 'fabric-mcp');
       request.input('client_id', sql.NVarChar(128), clientId);
       request.input('responses_endpoint', sql.NVarChar(2048), input.responsesEndpoint.trim());
       request.input('activity_endpoint', sql.NVarChar(2048), input.activityEndpoint?.trim() || null);
@@ -170,6 +202,7 @@ export async function getAIAgentsForReport(params: {
   reportId: string;
 }): Promise<AIAgentConfig[]> {
   await ensureDataLayer();
+  await hasAgentTypeColumn();
 
   if (params.role !== 'admin') {
     const user = await queryOne<{ client_id: string | null }>(
@@ -194,7 +227,7 @@ export async function getAIAgentsForReport(params: {
   }
 
   const rows = await queryRows<DbAIAgent>(
-    `SELECT a.id, a.name, a.client_id, a.responses_endpoint, a.activity_endpoint, a.foundry_project, a.foundry_agent_name, a.foundry_agent_version,
+    `SELECT a.id, a.name, ${agentTypeSql('a')}, a.client_id, a.responses_endpoint, a.activity_endpoint, a.foundry_project, a.foundry_agent_name, a.foundry_agent_version,
             a.security_mode, a.migration_status, a.is_active
      FROM ai_agents a
      INNER JOIN ai_agent_reports ar ON ar.agent_id = a.id
@@ -214,9 +247,10 @@ export async function getAIAgentByIdForUser(params: {
   reportId?: string;
 }): Promise<AIAgentConfig | null> {
   await ensureDataLayer();
+  await hasAgentTypeColumn();
 
   const agent = await queryOne<DbAIAgent>(
-    `SELECT TOP (1) id, name, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version,
+    `SELECT TOP (1) id, name, ${agentTypeSql()}, client_id, responses_endpoint, activity_endpoint, foundry_project, foundry_agent_name, foundry_agent_version,
             security_mode, migration_status, is_active
      FROM ai_agents
      WHERE id = @agentId AND is_active = 1`,

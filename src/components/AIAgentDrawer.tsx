@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 interface AgentSummary {
   id: string;
   name: string;
+  agentType: 'fabric-mcp' | 'foundry-responses';
   responsesEndpoint: string;
   securityMode: 'none' | 'rls-inherit';
   migrationStatus: 'migrated' | 'legacy' | 'manual';
@@ -23,6 +24,8 @@ interface AIAgentDrawerProps {
   agents: AgentSummary[];
   onClose: () => void;
 }
+
+type DrawerSize = 'normal' | 'wide' | 'full';
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
@@ -48,12 +51,20 @@ function ThinkingIndicator({ startTime }: { startTime: number }) {
 export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAgentDrawerProps) {
   const [historyMap, setHistoryMap] = useState<Record<string, ChatMessage[]>>({});
   const [input, setInput] = useState('');
+  const [drawerSize, setDrawerSize] = useState<DrawerSize>('normal');
   const [sending, setSending] = useState(false);
   const [sendStartTime, setSendStartTime] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const adjustTextareaHeight = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
 
   const selectedAgent = useMemo(
     () => agents.find((a) => a.id === selectedAgentId) ?? agents[0] ?? null,
@@ -88,6 +99,10 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
   useEffect(() => {
     if (open && !sending) textareaRef.current?.focus();
   }, [open, sending, selectedAgentId]);
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [input, open, selectedAgentId, adjustTextareaHeight]);
 
   async function sendMessage() {
     const text = input.trim();
@@ -142,10 +157,21 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
     setError(null);
   }
 
+  function cycleDrawerSize() {
+    setDrawerSize((prev) => {
+      if (prev === 'normal') return 'wide';
+      if (prev === 'wide') return 'full';
+      return 'normal';
+    });
+  }
+
+  const drawerSizeClass = drawerSize === 'wide' ? 'ai-drawer--wide' : drawerSize === 'full' ? 'ai-drawer--full' : '';
+  const resizeTitle = drawerSize === 'normal' ? 'Ampliar panel' : drawerSize === 'wide' ? 'Expandir a casi pantalla completa' : 'Reducir panel';
+
   if (!open) return null;
 
   return (
-    <aside className="ai-drawer" aria-label="Panel de agente">
+    <aside className={`ai-drawer ${drawerSizeClass}`} aria-label="Panel de agente">
       {/* Header */}
       <div className="ai-drawer-header">
         <div className="ai-drawer-header-info">
@@ -158,6 +184,28 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
           </div>
         </div>
         <div className="ai-drawer-actions">
+          <button
+            className="ai-btn-icon"
+            onClick={cycleDrawerSize}
+            title={resizeTitle}
+            aria-label={resizeTitle}
+          >
+            {drawerSize === 'normal' && (
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" width="16" height="16">
+                <path d="M2.5 6.5v-3h3M13.5 9.5v3h-3M10.5 3.5h3v3M5.5 12.5h-3v-3" />
+              </svg>
+            )}
+            {drawerSize === 'wide' && (
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" width="16" height="16">
+                <path d="M2 2h4M2 2v4M14 2h-4M14 2v4M2 14h4M2 14v-4M14 14h-4M14 14v-4" />
+              </svg>
+            )}
+            {drawerSize === 'full' && (
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" width="16" height="16">
+                <path d="M6.5 2.5H3.5v3M9.5 13.5h3v-3M12.5 5.5l-3-3M3.5 10.5l3 3" />
+              </svg>
+            )}
+          </button>
           {messages.length > 0 && (
             <button className="ai-btn-icon" onClick={clearHistory} title="Nueva conversación" aria-label="Nueva conversación">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" width="16" height="16">
@@ -235,7 +283,10 @@ export default function AIAgentDrawer({ open, reportId, agents, onClose }: AIAge
                 rows={1}
                 placeholder="Escribe tu pregunta…"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  adjustTextareaHeight();
+                }}
                 onKeyDown={handleKeyDown}
                 disabled={sending || !selectedAgent}
               />

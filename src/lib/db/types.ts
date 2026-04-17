@@ -28,9 +28,12 @@ export interface DbReport {
   is_active: boolean | number;
 }
 
+export type AgentType = 'fabric-mcp' | 'foundry-responses';
+
 export interface DbAIAgent {
   id: string;
   name: string;
+  agent_type: AgentType;
   client_id: string;
   responses_endpoint: string | null;
   activity_endpoint: string | null;

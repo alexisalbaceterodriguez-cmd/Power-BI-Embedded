@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/auth';
 import { getToken } from 'next-auth/jwt';
 import { getAIAgentByIdForUser, getSecureReportConfigForUser, recordAuditEvent } from '@/lib/dal';
-import { chatWithFoundryAgent } from '@/services/foundryAgents';
+import { chatWithAgent } from '@/services/foundryAgents';
 import { PowerBIServiceError } from '@/services/powerbi';
 
 export const runtime = 'nodejs';
@@ -196,7 +196,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const assistantText = await chatWithFoundryAgent({
+    const assistantText = await chatWithAgent({
+      agentType: agent.agentType,
       responsesEndpoint: agent.responsesEndpoint,
       securityMode: agent.securityMode,
       userName: effectiveUserName,

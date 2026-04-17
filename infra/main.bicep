@@ -271,8 +271,8 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'AZURE_SQL_AUTH_MODE', value: 'azure-default' }
         { name: 'AZURE_SQL_ENCRYPT', value: 'true' }
         { name: 'AZURE_SQL_TRUST_SERVER_CERTIFICATE', value: 'false' }
-        // ── Azure AI Foundry ─────────────────────────────────────────────────
-        { name: 'FOUNDRY_API_SCOPE', value: 'https://ai.azure.com/.default' }
+        // ── AI Agent token (Fabric MCP default; Foundry Responses uses ai.azure.com/.default)
+        { name: 'FOUNDRY_API_SCOPE', value: 'https://api.fabric.microsoft.com/.default' }
         { name: 'FOUNDRY_AUTH_MODE', value: 'azure-default' }
         // ── Bootstrap (optional — remove after first deploy) ─────────────────
         { name: 'BOOTSTRAP_ADMIN_EMAIL', value: bootstrapAdminEmail }

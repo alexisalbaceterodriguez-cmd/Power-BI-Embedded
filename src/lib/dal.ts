@@ -64,9 +64,12 @@ export interface CreateReportInput {
   isActive?: boolean;
 }
 
+export type AgentType = 'fabric-mcp' | 'foundry-responses';
+
 export interface AIAgentConfig {
   id: string;
   name: string;
+  agentType: AgentType;
   clientId: string;
   responsesEndpoint: string;
   activityEndpoint?: string;
@@ -81,6 +84,7 @@ export interface AIAgentConfig {
 
 export interface CreateAIAgentInput {
   name: string;
+  agentType: AgentType;
   clientId: string;
   responsesEndpoint: string;
   activityEndpoint?: string;

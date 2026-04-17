@@ -126,20 +126,33 @@ src/
 
 ---
 
-## Chat con Fabric Data Agents (MCP)
+## Chat con agentes IA (arquitectura dual)
 
-El chat utiliza el protocolo **MCP JSON-RPC 2.0**. El flujo es:
+La app soporta **dos tipos de agente** (`agent_type` en BD):
+
+### Fabric Data Agents (`fabric-mcp`)
+
+Protocolo **MCP JSON-RPC 2.0**:
 
 1. `POST /api/ai-agents/chat` recibe `{ reportId, agentId, messages[] }`
-2. Extrae el `userAccessToken` del JWT de sesion via `getToken()` (con secret explicito)
-3. Llama a `chatWithFoundryAgent({ reportId, agentId, messages, userAccessToken? })`
-4. `chatWithFoundryAgent` intenta OBO con el token del usuario
-5. Si OBO falla (consent no otorgado), usa SP token como fallback
-6. Envia JSON-RPC 2.0 al endpoint MCP del agente:
-   `https://api.fabric.microsoft.com/v1/mcp/workspaces/<wsId>/dataagents/<agentId>/agent`
-7. Parsea la respuesta MCP y devuelve el texto al cliente
+2. `chatWithAgent()` detecta `agentType === 'fabric-mcp'`
+3. OBO con scope `api.fabric.microsoft.com/.default` (fallback a SP token)
+4. `tools/list` para descubrir el tool name, luego `tools/call` con `{ userQuestion }`
+5. Endpoint: `https://api.fabric.microsoft.com/v1/mcp/workspaces/<wsId>/dataagents/<agentId>/agent`
+6. Parsea respuesta MCP via `extractMcpText()`
 
-**No usar** la API `Responses` de Azure AI Foundry (`/responses` endpoint). Esa API fue reemplazada por el endpoint MCP de Fabric.
+### Azure AI Foundry (`foundry-responses`)
+
+Protocolo **Responses API**:
+
+1. `POST /api/ai-agents/chat` recibe `{ reportId, agentId, messages[] }`
+2. `chatWithAgent()` detecta `agentType === 'foundry-responses'`
+3. OBO con scope `ai.azure.com/.default` (fallback a SP token)
+4. POST al endpoint con `{ input: userMessage }`
+5. Endpoint: `https://....services.ai.azure.com/.../protocols/openai/responses`
+6. Parsea respuesta via `extractAssistantText()`
+
+El dispatcher unificado es `chatWithAgent()` en `src/services/foundryAgents.ts`.
 
 ---
 
@@ -191,7 +204,7 @@ El flujo OBO esta activo. Los Fabric scopes **NO se incluyen** en `authorization
 
 - No añadir clases de Tailwind (instalado pero no usado, podria romper el build de CSS).
 - No usar `AUTH_SECRET` como nombre de variable; la app usa `NEXTAUTH_SECRET`.
-- No llamar a la API Responses de Azure AI Foundry; el backend usa MCP.
 - No crear helpers de autenticacion propios; usar `getServerSession` / `getToken` de Auth.js.
 - No introducir queries N+1; usar `IN (...)` o `Promise.all` con batch queries.
 - No almacenar secretos en el codigo o en variables no cifradas en produccion.
+- No añadir Fabric scopes a `authorization.params` ni al refresh de token: rompe el login.

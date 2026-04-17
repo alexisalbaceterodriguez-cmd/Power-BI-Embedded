@@ -14,6 +14,7 @@ export async function POST(request: NextRequest) {
   try {
     const payload = (await request.json()) as {
       name?: string;
+      agentType?: 'fabric-mcp' | 'foundry-responses';
       clientId?: string;
       responsesEndpoint?: string;
       activityEndpoint?: string;
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
 
     await createAIAgentFromAdmin({
       name: payload.name?.trim() ?? '',
+      agentType: payload.agentType ?? 'fabric-mcp',
       clientId: payload.clientId?.trim() ?? '',
       responsesEndpoint: payload.responsesEndpoint?.trim() ?? '',
       activityEndpoint: payload.activityEndpoint?.trim(),
@@ -67,6 +69,7 @@ export async function PUT(request: NextRequest) {
     const payload = (await request.json()) as {
       id?: string;
       name?: string;
+      agentType?: 'fabric-mcp' | 'foundry-responses';
       clientId?: string;
       responsesEndpoint?: string;
       activityEndpoint?: string;
@@ -82,6 +85,7 @@ export async function PUT(request: NextRequest) {
     await updateAIAgentFromAdmin({
       id: payload.id?.trim() ?? '',
       name: payload.name?.trim() ?? '',
+      agentType: payload.agentType ?? 'fabric-mcp',
       clientId: payload.clientId?.trim() ?? '',
       responsesEndpoint: payload.responsesEndpoint?.trim() ?? '',
       activityEndpoint: payload.activityEndpoint?.trim(),

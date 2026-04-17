@@ -395,6 +395,15 @@ html, body {
   display: flex;
   flex-direction: column;
   animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: width 0.22s ease;
+}
+
+.ai-drawer.ai-drawer--wide {
+  width: min(720px, 100%);
+}
+
+.ai-drawer.ai-drawer--full {
+  width: min(980px, 100%);
 }
 
 @keyframes slideInRight {
@@ -1417,6 +1426,87 @@ html, body {
 .admin-pill.off {
   background: rgba(220, 69, 69, 0.12);
   color: #ac2f2f;
+}
+
+.admin-pill.agent-type {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.admin-pill.agent-type.fabric-mcp {
+  background: rgba(102, 182, 255, 0.18);
+  color: #1a6fbf;
+}
+
+.admin-pill.agent-type.foundry-responses {
+  background: rgba(209, 100, 70, 0.15);
+  color: #a84530;
+}
+
+/* ── Agent type selector ── */
+
+.agent-type-selector {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.agent-type-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.8rem;
+  border: 2px solid var(--seidor-border);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--seidor-gray);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.agent-type-btn:hover {
+  border-color: var(--seidor-malibu);
+  background: rgba(102, 182, 255, 0.06);
+}
+
+.agent-type-btn.active {
+  border-color: var(--seidor-malibu);
+  background: rgba(102, 182, 255, 0.12);
+  color: var(--seidor-black);
+  box-shadow: 0 0 0 1px rgba(102, 182, 255, 0.3);
+}
+
+.agent-type-icon {
+  font-size: 1rem;
+}
+
+/* ── Form field labels ── */
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.form-field.full-width {
+  grid-column: 1 / -1;
+}
+
+.form-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--seidor-gray);
+  letter-spacing: 0.01em;
+}
+
+.form-hint {
+  font-weight: 400;
+  color: #aaa;
+  font-size: 0.72rem;
 }
 
 @media (max-width: 1120px) {

@@ -23,6 +23,7 @@ interface PublicReport {
 interface AgentSummary {
   id: string;
   name: string;
+  agentType: 'fabric-mcp' | 'foundry-responses';
   responsesEndpoint: string;
   securityMode: 'none' | 'rls-inherit';
   migrationStatus: 'migrated' | 'legacy' | 'manual';

@@ -1,4 +1,5 @@
 import { PowerBIServiceError } from '@/services/powerbi';
+import type { AgentType } from '@/lib/db/types';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -49,6 +50,33 @@ function latestUserQuestion(messages: Array<{ role: 'system' | 'user' | 'assista
   return latestUser ? latestUser.content.trim() : null;
 }
 
+function buildConversationPrompt(messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>): string {
+  const normalized = messages
+    .map((msg) => ({ role: msg.role, content: msg.content.trim() }))
+    .filter((msg) => Boolean(msg.content));
+
+  const latestUser = latestUserQuestion(normalized);
+  if (!latestUser) return '';
+
+  // Keep a short rolling memory to avoid oversized prompts while preserving context.
+  const history = normalized.slice(-12, -1);
+  if (history.length === 0) return latestUser;
+
+  const formattedHistory = history
+    .map((msg) => {
+      const label = msg.role === 'assistant' ? 'Asistente' : msg.role === 'system' ? 'Sistema' : 'Usuario';
+      return `${label}: ${msg.content}`;
+    })
+    .join('\n');
+
+  return [
+    'Contexto de conversacion previa (utilizalo para responder con continuidad):',
+    formattedHistory,
+    '',
+    `Pregunta actual del usuario: ${latestUser}`,
+  ].join('\n');
+}
+
 function extractAssistantText(payload: unknown): string {
   const record = payload as Record<string, unknown>;
 
@@ -91,7 +119,15 @@ function inferFoundryPublicMessageByStatus(status: number): string {
   return 'No fue posible consultar el agente de datos en este momento.';
 }
 
-export async function getFoundryApiToken(): Promise<string> {
+const FABRIC_SCOPE = 'https://api.fabric.microsoft.com/.default';
+const FOUNDRY_SCOPE = 'https://ai.azure.com/.default';
+
+function scopeForAgentType(agentType: AgentType): string {
+  return agentType === 'foundry-responses' ? FOUNDRY_SCOPE : FABRIC_SCOPE;
+}
+
+export async function getFoundryApiToken(scope?: string): Promise<string> {
+  const effectiveScope = scope ?? FABRIC_SCOPE;
   const authMode = process.env.FOUNDRY_AUTH_MODE?.trim().toLowerCase();
   if (authMode === 'azure-cli' || authMode === 'azcli') {
     const cliToken = await getFoundryApiTokenFromAzureCli();
@@ -109,7 +145,6 @@ export async function getFoundryApiToken(): Promise<string> {
   const tenantId = process.env.AZURE_TENANT_ID?.trim();
   const clientId = process.env.AZURE_CLIENT_ID?.trim();
   const clientSecret = process.env.AZURE_CLIENT_SECRET?.trim();
-  const scope = process.env.FOUNDRY_API_SCOPE?.trim() || 'https://api.fabric.microsoft.com/.default';
 
   if (!tenantId || !clientId || !clientSecret) {
     throw new PowerBIServiceError('Missing AZURE_* credentials for Foundry.', 'El servicio de agentes de datos no esta configurado.', 500);
@@ -119,7 +154,7 @@ export async function getFoundryApiToken(): Promise<string> {
     client_id: clientId,
     client_secret: clientSecret,
     grant_type: 'client_credentials',
-    scope,
+    scope: effectiveScope,
   });
 
   const response = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
@@ -152,8 +187,9 @@ export async function getFoundryApiToken(): Promise<string> {
   return data.access_token;
 }
 
-// ── OBO: exchange user's Entra ID access token for a Fabric-scoped token ──
-async function exchangeTokenViaOBO(userAccessToken: string): Promise<string> {
+// ── OBO: exchange user's Entra ID token for a target-scoped token ──
+async function exchangeTokenViaOBO(userAccessToken: string, scope?: string): Promise<string> {
+  const effectiveScope = scope ?? FABRIC_SCOPE;
   const tenantId = process.env.AZURE_TENANT_ID?.trim();
   const clientId = (process.env.AUTH_MICROSOFT_ENTRA_ID_ID ?? process.env.AZURE_CLIENT_ID)?.trim();
   const clientSecret = (process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET ?? process.env.AZURE_CLIENT_SECRET)?.trim();
@@ -167,7 +203,7 @@ async function exchangeTokenViaOBO(userAccessToken: string): Promise<string> {
     client_secret: clientSecret,
     grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
     assertion: userAccessToken,
-    scope: 'https://api.fabric.microsoft.com/.default',
+    scope: effectiveScope,
     requested_token_use: 'on_behalf_of',
   });
 
@@ -282,8 +318,8 @@ export async function chatWithFoundryAgent(params: {
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   userAccessToken?: string;
 }): Promise<string> {
-  const userMessage = latestUserQuestion(params.messages);
-  if (!userMessage) {
+  const conversationPrompt = buildConversationPrompt(params.messages);
+  if (!conversationPrompt) {
     throw new PowerBIServiceError(
       'Foundry responses call skipped: missing user message.',
       'No se pudo construir la pregunta para el agente de datos.',
@@ -295,13 +331,13 @@ export async function chatWithFoundryAgent(params: {
   let token: string;
   if (params.userAccessToken) {
     try {
-      token = await exchangeTokenViaOBO(params.userAccessToken);
+      token = await exchangeTokenViaOBO(params.userAccessToken, FABRIC_SCOPE);
     } catch (oboError) {
       console.warn('[foundryAgents] OBO exchange failed, falling back to SP token:', oboError instanceof Error ? oboError.message : oboError);
-      token = await getFoundryApiToken();
+      token = await getFoundryApiToken(FABRIC_SCOPE);
     }
   } else {
-    token = await getFoundryApiToken();
+    token = await getFoundryApiToken(FABRIC_SCOPE);
   }
 
   const toolName = await discoverMcpToolName(params.responsesEndpoint, token);
@@ -313,7 +349,7 @@ export async function chatWithFoundryAgent(params: {
     method: 'tools/call',
     params: {
       name: toolName,
-      arguments: { userQuestion: userMessage },
+      arguments: { userQuestion: conversationPrompt },
     },
   };
 
@@ -363,4 +399,79 @@ export async function chatWithFoundryAgent(params: {
     if (err instanceof PowerBIServiceError) throw err;
     return sanitizeAssistantText(rawBody || 'No se recibio respuesta del agente.');
   }
+}
+
+// ── Azure AI Foundry Responses API chat ──────────────────────────────────────
+
+async function chatWithFoundryResponses(params: {
+  responsesEndpoint: string;
+  securityMode: 'none' | 'rls-inherit';
+  userName?: string;
+  rlsRoles?: string[];
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  userAccessToken?: string;
+}): Promise<string> {
+  const conversationPrompt = buildConversationPrompt(params.messages);
+  if (!conversationPrompt) {
+    throw new PowerBIServiceError(
+      'Foundry responses call skipped: missing user message.',
+      'No se pudo construir la pregunta para el agente de datos.',
+      400
+    );
+  }
+
+  let token: string;
+  if (params.userAccessToken) {
+    try {
+      token = await exchangeTokenViaOBO(params.userAccessToken, FOUNDRY_SCOPE);
+    } catch (oboError) {
+      console.warn('[foundryAgents] OBO exchange failed for Foundry Responses, falling back to SP token:', oboError instanceof Error ? oboError.message : oboError);
+      token = await getFoundryApiToken(FOUNDRY_SCOPE);
+    }
+  } else {
+    token = await getFoundryApiToken(FOUNDRY_SCOPE);
+  }
+
+  const response = await fetch(params.responsesEndpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ input: conversationPrompt }),
+    cache: 'no-store',
+  });
+
+  const rawBody = (await safeText(response)) ?? '';
+  if (!response.ok) {
+    throw new PowerBIServiceError(
+      `Foundry Responses API failed (${response.status}) on ${params.responsesEndpoint}: ${rawBody}`,
+      inferFoundryPublicMessageByStatus(response.status),
+      502
+    );
+  }
+
+  try {
+    const payload = JSON.parse(rawBody) as unknown;
+    return extractAssistantText(payload);
+  } catch {
+    return sanitizeAssistantText(rawBody || 'No se recibio respuesta del agente.');
+  }
+}
+
+// ── Unified dispatcher: routes to the correct protocol based on agentType ──
+
+export async function chatWithAgent(params: {
+  agentType: AgentType;
+  responsesEndpoint: string;
+  securityMode: 'none' | 'rls-inherit';
+  userName?: string;
+  rlsRoles?: string[];
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  userAccessToken?: string;
+}): Promise<string> {
+  if (params.agentType === 'foundry-responses') {
+    return chatWithFoundryResponses(params);
+  }
+  return chatWithFoundryAgent(params);
 }

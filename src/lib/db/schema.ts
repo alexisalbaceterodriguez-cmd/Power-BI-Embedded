@@ -84,6 +84,7 @@ BEGIN
   CREATE TABLE dbo.ai_agents (
     id NVARCHAR(64) NOT NULL PRIMARY KEY,
     name NVARCHAR(256) NOT NULL,
+    agent_type NVARCHAR(32) NOT NULL DEFAULT 'fabric-mcp',
     responses_endpoint NVARCHAR(2048) NULL,
     activity_endpoint NVARCHAR(2048) NULL,
     foundry_project NVARCHAR(256) NULL,
@@ -91,9 +92,9 @@ BEGIN
     foundry_agent_version NVARCHAR(64) NULL,
     security_mode NVARCHAR(32) NOT NULL DEFAULT 'none',
     migration_status NVARCHAR(32) NOT NULL DEFAULT 'legacy',
-    published_url NVARCHAR(1024) NOT NULL,   -- deprecated: use responses_endpoint instead
-    mcp_url NVARCHAR(1024) NULL,              -- deprecated: MCP support removed
-    mcp_tool_name NVARCHAR(256) NULL,         -- deprecated: MCP support removed
+    published_url NVARCHAR(1024) NOT NULL,   -- deprecated: kept for backwards compat
+    mcp_url NVARCHAR(1024) NULL,              -- deprecated: kept for backwards compat
+    mcp_tool_name NVARCHAR(256) NULL,         -- deprecated: kept for backwards compat
     is_active BIT NOT NULL DEFAULT 1,
     created_at DATETIME2 NOT NULL,
     updated_at DATETIME2 NOT NULL
@@ -195,10 +196,28 @@ BEGIN
 END;
 `;
 
+// Migrations that require ALTER TABLE — run separately so permission errors don't block signIn.
+const migrationsSql = [
+  `IF COL_LENGTH('dbo.ai_agents', 'agent_type') IS NULL AND OBJECT_ID('dbo.ai_agents', 'U') IS NOT NULL
+   BEGIN
+     ALTER TABLE dbo.ai_agents ADD agent_type NVARCHAR(32) NOT NULL CONSTRAINT DF_ai_agents_agent_type DEFAULT 'fabric-mcp';
+   END;`,
+];
+
 export async function ensureDataLayer(): Promise<void> {
   if (initialized) return;
   const p = await getPool();
   await p.request().batch(schemaSql);
+
+  // Run non-critical migrations — don't block auth if ALTER TABLE permissions are missing.
+  for (const migration of migrationsSql) {
+    try {
+      await p.request().batch(migration);
+    } catch (err) {
+      console.warn('[schema] Non-critical migration skipped:', err instanceof Error ? err.message : err);
+    }
+  }
+
   await seedBootstrapData();
   await backfillDefaultClientsAndAssignments();
   initialized = true;
